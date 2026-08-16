@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="marinara" data-scheme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pasta Pass Tracker</title>
+<meta name="description" content="Track Olive Garden visits and Never-Ending Pasta Pass usage.">
+<meta name="theme-color" content="#9a2820" id="meta-theme-color">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pasta Pass">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./css/themes.css">
+<link rel="stylesheet" href="./css/styles.css">
+<script>
+/* Theme bootstrap. Runs before first paint to prevent a flash of the wrong theme.
+   Reads localStorage synchronously because IndexedDB is async and would be too late. */
+(function () {
+  try {
+    var raw = localStorage.getItem('ppt.theme');
+    var t = raw ? JSON.parse(raw) : null;
+    var palette = (t && t.palette) || 'marinara';
+    var mode = (t && t.mode) || 'system';
+    var scheme = mode === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    var el = document.documentElement;
+    el.setAttribute('data-theme', palette);
+    el.setAttribute('data-scheme', scheme);
+    if (t && t.custom) {
+      for (var k in t.custom) {
+        if (t.custom[k]) el.style.setProperty('--' + k, t.custom[k]);
+      }
+    }
+  } catch (e) { /* fall back to the markup defaults */ }
+})();
+/* Install prompt capture. `beforeinstallprompt` can fire before ES modules
+   finish loading, so the event is parked here for js/install.js to replay. */
+(function () {
+  window.__pptInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    window.__pptInstallPrompt = e;
+    window.dispatchEvent(new CustomEvent('ppt:installavailable'));
+  });
+  window.addEventListener('appinstalled', function () {
+    window.__pptInstallPrompt = null;
+    window.dispatchEvent(new CustomEvent('ppt:installed'));
+  });
+})();
+</script>
+</head>
+<body>
+
+<a class="skip-link" href="#view">Skip to content</a>
+
+<header class="app-header">
+  <div class="app-header__inner">
+    <h1 class="app-header__title">
+      <span class="app-header__mark" aria-hidden="true">🍝</span>
+      <span>Pasta Pass Tracker</span>
+    </h1>
+    <div class="app-header__actions">
+      <button type="button" class="icon-btn" id="scheme-toggle"
+              title="Toggle light / dark" aria-label="Toggle light or dark mode">
+        <span class="icon-btn__glyph" data-scheme-glyph></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="view" class="view" tabindex="-1">
+  <div class="loading">Loading…</div>
+</main>
+
+<nav class="tabbar" aria-label="Primary">
+  <a class="tabbar__item" href="#/" data-nav="/">
+    <span class="tabbar__glyph" aria-hidden="true">🏠</span><span class="tabbar__label">Home</span>
+  </a>
+  <a class="tabbar__item" href="#/visits" data-nav="/visits">
+    <span class="tabbar__glyph" aria-hidden="true">📋</span><span class="tabbar__label">Visits</span>
+  </a>
+  <a class="tabbar__item tabbar__item--primary" href="#/log" data-nav="/log">
+    <span class="tabbar__glyph" aria-hidden="true">＋</span><span class="tabbar__label">Bowl</span>
+  </a>
+  <a class="tabbar__item" href="#/combos" data-nav="/combos">
+    <span class="tabbar__glyph" aria-hidden="true">🎲</span><span class="tabbar__label">Combos</span>
+  </a>
+  <a class="tabbar__item" href="#/stats" data-nav="/stats">
+    <span class="tabbar__glyph" aria-hidden="true">📊</span><span class="tabbar__label">Stats</span>
+  </a>
+  <a class="tabbar__item" href="#/settings" data-nav="/settings">
+    <span class="tabbar__glyph" aria-hidden="true">⚙️</span><span class="tabbar__label">More</span>
+  </a>
+</nav>
+
+<div id="toast-host" class="toast-host" role="status" aria-live="polite"></div>
+<div id="modal-host" class="modal-host" hidden></div>
+
+<noscript>
+  <p style="padding:1rem">Pasta Pass Tracker needs JavaScript enabled.</p>
+</noscript>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

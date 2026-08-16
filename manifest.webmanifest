@@ -1,0 +1,24 @@
+{
+  "name": "Pasta Pass Tracker",
+  "short_name": "Pasta Pass",
+  "description": "Track Olive Garden visits and Never-Ending Pasta Pass usage.",
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "background_color": "#faf6f4",
+  "theme_color": "#9a2820",
+  "categories": ["food", "lifestyle", "utilities"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Add a bowl", "url": "./#/log" },
+    { "name": "Log a past visit", "url": "./#/visits/new" },
+    { "name": "Combos", "url": "./#/combos" },
+    { "name": "Stats", "url": "./#/stats" }
+  ]
+}

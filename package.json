@@ -1,0 +1,16 @@
+{
+  "name": "pasta-pass-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first PWA for tracking Olive Garden visits and Never-Ending Pasta Pass usage.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "test:unit": "node tests/run.mjs --unit",
+    "test:functional": "node tests/run.mjs --functional",
+    "serve": "node tests/helpers/serve-cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

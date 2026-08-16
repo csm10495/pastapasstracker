@@ -1,0 +1,171 @@
+/* ==========================================================================
+   Theme palettes.
+
+   Two independent axes compose freely:
+     data-scheme = light | dark      -> neutrals, surfaces, text
+     data-theme  = <palette name>    -> accent + brand tint
+
+   Every colour in the app resolves from these custom properties, so a theme
+   is just a variable set. No per-component overrides anywhere.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --radius-sm: 6px;
+  --radius: 12px;
+  --radius-lg: 18px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .06), 0 1px 3px rgba(0, 0, 0, .08);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, .10), 0 2px 4px rgba(0, 0, 0, .06);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, .18);
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* --------------------------------------------------------------------------
+   Scheme: neutrals
+   -------------------------------------------------------------------------- */
+
+[data-scheme="light"] {
+  color-scheme: light;
+  --bg: #faf6f4;
+  --surface: #ffffff;
+  --surface-2: #f3eeeb;
+  --surface-3: #e8e1dd;
+  --border: #ded5d0;
+  --border-strong: #c6b9b2;
+  --text: #1f1a18;
+  --text-dim: #6b5f5a;
+  --text-faint: #978a84;
+  --overlay: rgba(31, 26, 24, .45);
+  --good: #1a7f4b;
+  --warn: #8a5a06;
+  --bad: #b3261e;
+}
+
+[data-scheme="dark"] {
+  color-scheme: dark;
+  --bg: #16120f;
+  --surface: #221c19;
+  --surface-2: #2c2521;
+  --surface-3: #382f2a;
+  --border: #3a312c;
+  --border-strong: #55483f;
+  --text: #f5efec;
+  --text-dim: #b7a9a2;
+  --text-faint: #8a7c75;
+  --overlay: rgba(0, 0, 0, .62);
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #ff6b5e;
+}
+
+/* --------------------------------------------------------------------------
+   Palettes: accent + brand tint
+
+   --accent           primary brand colour
+   --accent-contrast  text colour that sits on --accent
+   --accent-soft      low-emphasis fill (chips, selected rows)
+   --accent-tint      page background wash
+   -------------------------------------------------------------------------- */
+
+/* Marinara — the default. Tomato red. */
+[data-theme="marinara"][data-scheme="light"] {
+  --accent: #9a2820;
+  --accent-contrast: #ffffff;
+  --accent-soft: #f7e3e0;
+  --accent-tint: #fdf7f6;
+}
+[data-theme="marinara"][data-scheme="dark"] {
+  --accent: #ff7166;
+  --accent-contrast: #2a0d0a;
+  --accent-soft: #3a201c;
+  --accent-tint: #1a100e;
+}
+
+/* Alfredo — warm cream and butter. */
+[data-theme="alfredo"][data-scheme="light"] {
+  --accent: #8f6415;
+  --accent-contrast: #ffffff;
+  --accent-soft: #f7ecd9;
+  --accent-tint: #fdfaf3;
+}
+[data-theme="alfredo"][data-scheme="dark"] {
+  --accent: #f0c274;
+  --accent-contrast: #2a1d06;
+  --accent-soft: #3a2f1b;
+  --accent-tint: #191510;
+}
+
+/* Basil — garden green. */
+[data-theme="basil"][data-scheme="light"] {
+  --accent: #2f6b3a;
+  --accent-contrast: #ffffff;
+  --accent-soft: #dfeee2;
+  --accent-tint: #f5faf6;
+}
+[data-theme="basil"][data-scheme="dark"] {
+  --accent: #6ecf8a;
+  --accent-contrast: #08260f;
+  --accent-soft: #1d3324;
+  --accent-tint: #101711;
+}
+
+/* Breadstick — golden brown. */
+[data-theme="breadstick"][data-scheme="light"] {
+  --accent: #96601a;
+  --accent-contrast: #ffffff;
+  --accent-soft: #f8e8d4;
+  --accent-tint: #fdf9f4;
+}
+[data-theme="breadstick"][data-scheme="dark"] {
+  --accent: #e8a45c;
+  --accent-contrast: #2b1806;
+  --accent-soft: #3a291a;
+  --accent-tint: #191410;
+}
+
+/* Chianti — deep wine purple. */
+[data-theme="chianti"][data-scheme="light"] {
+  --accent: #6b2a5e;
+  --accent-contrast: #ffffff;
+  --accent-soft: #f0e2ee;
+  --accent-tint: #fbf6fa;
+}
+[data-theme="chianti"][data-scheme="dark"] {
+  --accent: #d68ac6;
+  --accent-contrast: #2b0c24;
+  --accent-soft: #35202f;
+  --accent-tint: #171016;
+}
+
+/* Slate — neutral, minimal tint. */
+[data-theme="slate"][data-scheme="light"] {
+  --accent: #3f5063;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e3e8ee;
+  --accent-tint: #f7f8fa;
+}
+[data-theme="slate"][data-scheme="dark"] {
+  --accent: #93a9c0;
+  --accent-contrast: #101820;
+  --accent-soft: #24303c;
+  --accent-tint: #111417;
+}
+
+/* Custom — seeded from Slate, then overridden by inline custom properties
+   written onto <html> by the theme bootstrap and theme.js. */
+[data-theme="custom"][data-scheme="light"] {
+  --accent: #3f5063;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e3e8ee;
+  --accent-tint: #f7f8fa;
+}
+[data-theme="custom"][data-scheme="dark"] {
+  --accent: #93a9c0;
+  --accent-contrast: #101820;
+  --accent-soft: #24303c;
+  --accent-tint: #111417;
+}

@@ -1,0 +1,37 @@
+# Pasta Pass Tracker
+#
+# The app ships as plain static files with no build step and no runtime
+# dependencies, so there is very little to ignore. Everything below is either
+# local tooling, editor noise, or generated at deploy time.
+
+# --- Generated at deploy time by .github/workflows/deploy.yml ---
+# Written into the Pages artifact so Settings can report the running build.
+commit_hash.txt
+build_date.txt
+
+# --- Local tooling ---
+# Nothing is needed to run or test the app, but keep stray installs out.
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.npm/
+
+# --- Test and diagnostic artefacts ---
+tests/**/screenshots/
+*.local
+
+# --- Environment and secrets ---
+.env
+.env.*
+
+# --- OS noise ---
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# --- Editor and IDE ---
+.vscode/
+.idea/
+*.swp
+*~
