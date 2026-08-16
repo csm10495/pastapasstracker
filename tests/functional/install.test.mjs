@@ -59,7 +59,10 @@ test('settings explains when the browser has not offered install yet', async () 
       window.dispatchEvent(new CustomEvent('ppt:installed'));
     })()`);
 
-    assert.match(await installCardText(app), /not offered an install prompt yet/i);
+    const text = await installCardText(app);
+    assert.match(text, /not offered an install prompt yet/i);
+    // Android users can always install from the browser menu, so say so.
+    assert.match(text, /Add to Home screen/i);
     assert.equal(await app.exists('[data-install-card] button'), false);
     app.assertNoErrors();
   });

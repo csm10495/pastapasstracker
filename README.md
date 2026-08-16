@@ -42,7 +42,8 @@ matters: *what is each bowl actually costing me?*
 - **Themes.** Six palettes, each with light and dark variants, plus a custom colour picker.
   Dark mode follows your system setting by default and updates live.
 - **Installable.** An **Install app** button in Settings, plus the commit and build date of the
-  running deployment.
+  running deployment. If your browser has not offered a prompt, Settings explains how to install
+  from the Android browser menu instead.
 - **Fully offline.** Works with no signal, and stores everything on your device.
 
 ## Running it
@@ -133,6 +134,13 @@ asserts that it boots, that `start_url`/`scope`/`id` resolve inside the subpath,
 worker is scoped to the subpath rather than the whole origin, that the shell caches, and that it
 still works offline. A companion test fails the build if any source file introduces a
 root-absolute path such as `src="/js/app.js"`.
+
+The manifest deliberately omits the `id` member. Unlike every other manifest URL, `id` is
+resolved against the **origin** rather than the manifest's own location, so a relative
+`"id": "./"` collapses to `https://<user>.github.io/` and every project site on the account
+claims the same app identity — at which point Chrome decides the app is already installed and
+never offers an install prompt. Omitting `id` defaults it to `start_url`, which is unique per
+subpath. `tests/unit/manifest.test.mjs` pins the computed app id.
 
 Every path in the app is relative, the manifest uses `"start_url": "./"` with `"scope": "./"`,
 and the service worker registers with a relative URL. The included `.nojekyll` file stops GitHub
