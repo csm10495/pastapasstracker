@@ -132,6 +132,9 @@ function installCard() {
       'Your browser has not offered an install prompt yet. It usually appears after a '
       + 'visit or two, and needs the app to be served over HTTPS. Look for an install '
       + 'icon in the address bar.'),
+    el('p', { class: 'muted small' },
+      'On Android, you can always install from the browser menu (⋮) → '
+      + '"Add to Home screen" or "Install app".'),
   ));
   return wrap;
 }

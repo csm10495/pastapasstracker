@@ -4,7 +4,6 @@
   "description": "Track Olive Garden visits and Never-Ending Pasta Pass usage.",
   "start_url": "./",
   "scope": "./",
-  "id": "./",
   "display": "standalone",
   "background_color": "#faf6f4",
   "theme_color": "#9a2820",

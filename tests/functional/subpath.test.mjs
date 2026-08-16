@@ -133,7 +133,7 @@ test('the manifest satisfies installability and resolves inside the subpath', as
         status: res.status,
         start: new URL(m.start_url, href).href,
         scope: new URL(m.scope, href).href,
-        id: new URL(m.id ?? m.start_url, href).href,
+        id: new URL(m.id ?? m.start_url, m.id ? location.origin : href).href,
         display: m.display,
         name: m.name,
         shortName: m.short_name,
@@ -146,7 +146,10 @@ test('the manifest satisfies installability and resolves inside the subpath', as
     assert.equal(manifest.status, 200);
     assert.equal(manifest.start, base, 'start_url must stay inside the subpath');
     assert.equal(manifest.scope, base, 'scope must stay inside the subpath');
-    assert.ok(manifest.id.startsWith(base), 'manifest id must stay inside the subpath');
+    // The `id` member is resolved against the *origin*, not the manifest URL, so a
+    // relative `"./"` would collapse to the domain root and collide with every other
+    // PWA on the same GitHub Pages account — which stops Chrome offering an install.
+    assert.equal(manifest.id, base, 'the computed app id must be unique to the subpath');
 
     // Chrome's installability requirements.
     assert.ok(['standalone', 'fullscreen', 'minimal-ui'].includes(manifest.display));
