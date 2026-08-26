@@ -16,7 +16,8 @@ import {
   applyTheme, deriveCustom, getPalettes, getTheme, resolveScheme,
 } from '../theme.js';
 import {
-  downloadBackup, inspectBackup, readBackupFile, restoreBackup, wipeEverything,
+  downloadBackup, downloadPhotoZip, inspectBackup, readBackupFile, restoreBackup,
+  wipeEverything,
 } from '../transfer.js';
 import {
   REPO_URL, canInstall, getBuildInfo, isInstalled, isIos, onInstallChange, promptInstall,
@@ -494,6 +495,15 @@ function backupCard() {
           toast('Backup downloaded');
         },
       }, 'Download data only (smaller)'),
+      el('button', {
+        type: 'button',
+        class: 'btn',
+        onClick: async () => {
+          const { count } = await downloadPhotoZip();
+          if (count) toast(`Exported ${count} photo${count === 1 ? '' : 's'}`);
+          else toast('No photos to export', 'bad');
+        },
+      }, 'Export photos (zip)'),
     ),
     field('Import backup', fileInput, 'Choose a JSON backup to preview it before restoring.'),
   );

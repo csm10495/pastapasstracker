@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 
@@ -19,6 +19,22 @@ const FIXTURE = {
     { name: 'OG Brookfield', city: 'Brookfield', state: 'WI', defaultMealPrice: 15.99, defaultToppingPrice: 4.99 },
   ],
 };
+
+/** Reads the stored (uncompressed) entries out of a zip archive. */
+function readStoredZip(buf) {
+  const entries = [];
+  let i = 0;
+  while (i + 4 <= buf.length && buf.readUInt32LE(i) === 0x04034b50) {
+    const size = buf.readUInt32LE(i + 18);
+    const nameLen = buf.readUInt16LE(i + 26);
+    const extraLen = buf.readUInt16LE(i + 28);
+    const name = buf.slice(i + 30, i + 30 + nameLen).toString('utf8');
+    const start = i + 30 + nameLen + extraLen;
+    entries.push({ name, data: buf.slice(start, start + size) });
+    i = start + size;
+  }
+  return entries;
+}
 
 async function addBowl(app, index = 0) {
   await app.click('Add bowl');
@@ -247,4 +263,94 @@ test('multiple photos can attach to one visit and removing one leaves the others
     assert.equal(photos[0].ownerId, visit.id);
     app.assertNoErrors();
   });
+});
+
+test('uploaded photos keep the original file bytes at full resolution', async () => {
+  await withApp(async (app) => {
+    await app.goto('/visits/new');
+    const png = largeFixturePng('ppt-full-quality.png');
+    let bytes;
+    try {
+      bytes = readFileSync(png.path);
+      await app.upload('input[type=file]', png.path, 0);
+      await app.waitFor(`(await (await import('${app.origin}/js/db.js')).getAll('photos')).length > 0`, {
+        label: 'photo stored',
+      });
+    } finally {
+      png.cleanup();
+    }
+    const stored = await app.run(`
+      const [photo] = await db.getAll('photos');
+      const buf = new Uint8Array(await photo.blob.arrayBuffer());
+      let digest = 0;
+      for (const b of buf) digest = (digest * 31 + b) >>> 0;
+      return {
+        size: photo.blob.size,
+        type: photo.blob.type,
+        filename: photo.filename,
+        width: photo.width,
+        height: photo.height,
+        digest,
+      };
+    `);
+    let digest = 0;
+    for (const b of bytes) digest = (digest * 31 + b) >>> 0;
+    assert.equal(stored.size, bytes.length, 'original bytes must be stored untouched');
+    assert.equal(stored.digest, digest);
+    assert.equal(stored.type, 'image/png');
+    assert.equal(stored.filename, 'ppt-full-quality.png');
+    assert.equal(stored.width, 640);
+    assert.equal(stored.height, 640);
+    app.assertNoErrors();
+  }, { seed: FIXTURE });
+});
+
+test('photo zip export contains every original in upload order', async () => {
+  await withApp(async (app) => {
+    await app.seed({
+      ...FIXTURE,
+      visits: [{ date: '2026-09-10', location: 'OG Brookfield', bowls: [{ person: 'Alice', pasta: 'Fettuccine', sauce: 'Alfredo' }] }],
+    });
+    const [visit] = await app.store('visits');
+    await app.goto(`/visits/${visit.id}/edit`);
+    for (const [n, name] of [[1, 'ppt-zip-one.png'], [2, 'ppt-zip-two.png']]) {
+      const png = fixturePng(name);
+      try {
+        await app.upload('input[type=file]', png.path, 0);
+        await app.waitFor(
+          `(await (await import('${app.origin}/js/db.js')).getAll('photos')).length === ${n}`,
+          { label: `photo ${n} stored` },
+        );
+      } finally {
+        png.cleanup();
+      }
+    }
+
+    const result = await app.run(`
+      const { blob, count } = await transfer.buildPhotoZip();
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (const b of buf) binary += String.fromCharCode(b);
+      const photos = transfer.sortPhotosByUpload(await db.getAll('photos'));
+      return { count, type: blob.type, base64: btoa(binary), sizes: photos.map((p) => p.blob.size) };
+    `);
+    assert.equal(result.count, 2);
+    assert.equal(result.type, 'application/zip');
+
+    const entries = readStoredZip(Buffer.from(result.base64, 'base64'));
+    assert.deepEqual(entries.map((e) => e.name.slice(0, 10)), ['001-visit-', '002-visit-']);
+    assert.deepEqual(entries.map((e) => e.data.length), result.sizes);
+    assert.ok(entries.every((e) => e.name.endsWith('.png')));
+    app.assertNoErrors();
+  });
+});
+
+test('exporting with no photos reports that there is nothing to export', async () => {
+  await withApp(async (app) => {
+    await app.goto('/settings');
+    await app.click('Export photos (zip)');
+    await app.waitFor(`document.querySelector('#toast-host .toast')`, { label: 'export toast' });
+    assert.match(await app.toastText(), /No photos to export/);
+    app.assertNoErrors();
+  }, { seed: FIXTURE });
 });

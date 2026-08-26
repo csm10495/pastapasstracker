@@ -10,6 +10,7 @@
 import { STORE_NAMES, BACKUP_VERSION } from './schema.js';
 import { getAll, putMany, clearAll, getDb } from './db.js';
 import { invalidateMenuCache } from './menu.js';
+import { createZip } from './zip.js';
 
 const PHOTO_BLOB_FIELDS = ['blob', 'thumbBlob'];
 
@@ -78,6 +79,83 @@ export async function downloadBackup({ includePhotos = true } = {}) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return backup;
+}
+
+/* --------------------------------------------------------- photo export -- */
+
+const MIME_EXT = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/avif': 'avif',
+};
+
+function extensionFor(photo) {
+  const fromName = /\.([A-Za-z0-9]{1,5})$/.exec(photo?.filename || '');
+  if (fromName) return fromName[1].toLowerCase();
+  const type = (photo?.type || photo?.blob?.type || '').toLowerCase();
+  return MIME_EXT[type] || 'jpg';
+}
+
+/**
+ * Upload order, which is the order the user actually took the photos in:
+ * creation timestamp first, then the per-owner sequence for photos added
+ * together in the same millisecond.
+ */
+export function sortPhotosByUpload(photos) {
+  return [...photos].sort((a, b) => (
+    String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+    || (a.seq ?? 0) - (b.seq ?? 0)
+    || String(a.id || '').localeCompare(String(b.id || ''))
+  ));
+}
+
+/**
+ * Name for a photo inside the archive. The numeric prefix preserves upload
+ * order in any file browser, which sorts alphabetically.
+ */
+export function photoFileName(photo, index) {
+  const n = String(index + 1).padStart(3, '0');
+  const owner = photo?.ownerType || 'photo';
+  const id = String(photo?.id || '').slice(0, 8) || 'unknown';
+  return `${n}-${owner}-${id}.${extensionFor(photo)}`;
+}
+
+/** Builds a zip of every stored photo original, in upload order. */
+export async function buildPhotoZip() {
+  const photos = sortPhotosByUpload(await getAll('photos'));
+  const entries = [];
+  photos.forEach((photo, i) => {
+    const blob = photo.blob instanceof Blob ? photo.blob : photo.thumbBlob;
+    if (!(blob instanceof Blob)) return;
+    entries.push({
+      name: photoFileName(photo, i),
+      data: blob,
+      date: photo.createdAt ? new Date(photo.createdAt) : new Date(),
+    });
+  });
+  const blob = await createZip(entries);
+  return { blob, count: entries.length };
+}
+
+/** Triggers a file download of every photo as a zip. */
+export async function downloadPhotoZip() {
+  const { blob, count } = await buildPhotoZip();
+  if (!count) return { count: 0 };
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pasta-pass-photos-${stamp}.zip`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { count };
 }
 
 /** Validates a parsed backup and summarises what it contains. */

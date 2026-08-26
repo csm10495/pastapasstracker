@@ -34,8 +34,9 @@ matters: *what is each bowl actually costing me?*
   frozen there. Correcting a location default later never rewrites your history.
 - **120-combo explorer.** A grid of every pasta × sauce × topping combination, tracking which
   you have tried, with a "suggest something new" button.
-- **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items. On a phone the
-  photo button offers both the camera and your library.
+- **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items, kept at full
+  original quality. On a phone the photo button offers both the camera and your library, and
+  Settings can export every photo to a zip.
 - **Season countdown.** Days remaining, pace, and projected final cost per bowl.
 - **Editable menu.** The official 2026 lineup is seeded but fully editable, because Olive Garden
   had not published the complete list before launch.
@@ -156,6 +157,11 @@ and no sync. **Clearing your browser's site data will erase everything.**
 Use **Settings → Backup & restore** to export a JSON file. Backups embed photos by default; a
 "data only" export is available when you want a small file. Import offers *replace* or *merge*.
 
+**Export photos (zip)** downloads every photo as its original, untouched file — nothing is
+resized or re-compressed on the way in or out — numbered in upload order
+(`001-visit-1a2b3c4d.jpg`) so any file browser lists them the way you took them. The archive is
+written by `js/zip.js`, which stores entries uncompressed because photos are already compressed.
+
 ## The 2026 menu
 
 Seeded from Olive Garden's July 2026 announcement, which confirmed **Spicy Alfredo** and
@@ -208,7 +214,8 @@ js/install.js              install prompt + build identity
 js/stats.js                all cost/savings/pace maths (pure functions)
 js/charts.js               hand-rolled inline SVG charts
 js/theme.js                palettes, system-scheme watcher, custom colours
-js/transfer.js             JSON backup and restore
+js/transfer.js             JSON backup and restore + photo zip export
+js/zip.js                  dependency-free zip writer
 js/ui.js                   DOM helpers, modals, toasts, formatting
 js/app.js                  hash router
 js/views/*.js              one module per screen

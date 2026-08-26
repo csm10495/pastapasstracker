@@ -5,14 +5,14 @@
  * a menu-item reference shot, a bowl photo, and a visit gallery all share one
  * code path. Owners never hold a photo id; the photo points at its owner.
  *
- * Originals are downscaled on capture and a small thumbnail is stored
- * alongside, so lists never decode full-size images.
+ * Originals are stored exactly as captured — full resolution, untouched
+ * bytes — so an export is as good as the file that came off the camera. A
+ * small thumbnail is stored alongside so lists never decode full-size images.
  */
 
 import { getPhotosFor, deletePhotosFor, save, remove, getDb } from './db.js';
 import { el, lightbox, toast } from './ui.js';
 
-const MAX_EDGE = 1400;
 const THUMB_EDGE = 320;
 const QUALITY = 0.82;
 
@@ -78,21 +78,25 @@ function toBlob(canvas) {
 }
 
 /**
- * Stores a file against an owner, downscaling and generating a thumbnail.
+ * Stores a file against an owner and generates a thumbnail.
+ *
+ * The original is kept byte-for-byte: re-encoding it would throw away
+ * resolution and quality that cannot be recovered, and the exported archive
+ * should hand back exactly what the camera produced.
+ *
  * Returns the saved photo record.
  */
 export async function addPhoto(file, ownerType, ownerId, { caption = '', seq = 0 } = {}) {
   if (!file || !ownerId) return null;
   const img = await loadImage(file);
-  const [blob, thumbBlob] = await Promise.all([
-    toBlob(drawScaled(img, MAX_EDGE)),
-    toBlob(drawScaled(img, THUMB_EDGE)),
-  ]);
+  const thumbBlob = await toBlob(drawScaled(img, THUMB_EDGE));
   return save('photos', {
     ownerType,
     ownerId,
-    blob,
+    blob: file,
     thumbBlob,
+    filename: file.name || '',
+    type: file.type || '',
     width: img.width,
     height: img.height,
     caption,
