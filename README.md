@@ -154,6 +154,10 @@ GitHub Pages serves over HTTPS, which is what browsers require before offering i
 Everything is stored in IndexedDB on the device you are using. There is no account, no server,
 and no sync. **Clearing your browser's site data will erase everything.**
 
+Normal app updates replace the cached app files without clearing IndexedDB. Existing diners,
+visits, bowls, settings, and original/thumbnail photo bytes are covered by an automated database
+upgrade regression test.
+
 Use **Settings → Backup & restore** to export a JSON file. Backups embed photos by default; a
 "data only" export is available when you want a small file. Import offers *replace* or *merge*.
 

@@ -248,3 +248,251 @@ test('multiple photos can attach to one visit and removing one leaves the others
     app.assertNoErrors();
   });
 });
+
+test('updating the app and database preserves existing records and exact photo bytes', async () => {
+  await withApp(async (app) => {
+    await app.waitFor(
+      `(async () => !!(await navigator.serviceWorker.getRegistration())?.active)()`,
+      { timeout: 15000, label: 'service worker activation before upgrade' },
+    );
+
+    await app.run(`
+      const schema = await import('${app.origin}/js/schema.js');
+      const current = await db.getDb();
+      current.close();
+
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(schema.DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error('Legacy database reset was blocked'));
+      });
+
+      const legacy = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(schema.DB_NAME, 1);
+        request.onupgradeneeded = () => {
+          const legacyDb = request.result;
+          for (const [name, definition] of Object.entries(schema.STORES)) {
+            const store = legacyDb.createObjectStore(name, { keyPath: definition.keyPath });
+            for (const index of definition.indexes) {
+              store.createIndex(index.name, index.keyPath, index.options || {});
+            }
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      const pngBase64 =
+        'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAP0lEQVR42u3OMQEAAAgDoC1p'
+        + 'b3vAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvA0K2AABtLuA'
+        + 'CQAAAABJRU5ErkJggg==';
+      const pngBytes = Uint8Array.from(atob(pngBase64), (char) => char.charCodeAt(0));
+      const jpegBytes = Uint8Array.from([255, 216, 255, 224, 1, 2, 3, 255, 217]);
+      const thumbBytes = Uint8Array.from([255, 216, 255, 225, 9, 8, 7, 255, 217]);
+      const createdAt = '2026-08-20T18:30:00.000Z';
+      const stores = Object.keys(schema.STORES);
+      const tx = legacy.transaction(stores, 'readwrite');
+
+      tx.objectStore('people').put({
+        id: 'legacy-person',
+        name: 'Legacy Diner',
+        color: '#123456',
+        hasPass: true,
+        passCost: 87.65,
+        passPurchasedOn: '2026-07-15',
+        active: true,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('locations').put({
+        id: 'legacy-location',
+        name: 'Legacy Olive Garden',
+        city: 'Orlando',
+        state: 'FL',
+        notes: 'Keep this note',
+        defaultMealPrice: null,
+        defaultToppingPrice: 3.21,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('visits').put({
+        id: 'legacy-visit',
+        date: '2026-08-20',
+        locationId: 'legacy-location',
+        notes: 'Existing visit',
+        mealPrice: 12.34,
+        toppingPrice: 3.21,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('bowls').put({
+        id: 'legacy-bowl',
+        visitId: 'legacy-visit',
+        personId: 'legacy-person',
+        pastaId: 'legacy-pasta',
+        sauceId: 'legacy-sauce',
+        toppingId: null,
+        rating: 5,
+        notes: 'Existing bowl',
+        seq: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('menuItems').put({
+        id: 'legacy-pasta',
+        kind: 'pasta',
+        name: 'Legacy Pasta',
+        isNew: false,
+        sortOrder: 0,
+        deletedAt: null,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('menuItems').put({
+        id: 'legacy-sauce',
+        kind: 'sauce',
+        name: 'Legacy Sauce',
+        isNew: false,
+        sortOrder: 1,
+        deletedAt: null,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('photos').put({
+        id: 'legacy-visit-photo',
+        ownerType: 'visit',
+        ownerId: 'legacy-visit',
+        blob: new Blob([pngBytes], { type: 'image/png' }),
+        thumbBlob: new Blob([pngBytes], { type: 'image/png' }),
+        width: 64,
+        height: 64,
+        caption: 'Existing visit photo',
+        seq: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('photos').put({
+        id: 'legacy-bowl-photo',
+        ownerType: 'bowl',
+        ownerId: 'legacy-bowl',
+        blob: new Blob([jpegBytes], { type: 'image/jpeg' }),
+        thumbBlob: new Blob([thumbBytes], { type: 'image/jpeg' }),
+        width: 1,
+        height: 1,
+        caption: 'Existing bowl photo',
+        seq: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      tx.objectStore('settings').put({ key: 'seeded', value: true });
+      tx.objectStore('settings').put({ key: 'mealPrice', value: 18.76 });
+
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Legacy seed transaction aborted'));
+      });
+      legacy.close();
+
+      const oldCache = await caches.open('ppt-v3');
+      await oldCache.put('./legacy-shell-marker', new Response('old app shell'));
+      return {
+        png: Array.from(pngBytes),
+        jpeg: Array.from(jpegBytes),
+        thumb: Array.from(thumbBytes),
+      };
+    `).then((bytes) => { app.legacyPhotoBytes = bytes; });
+
+    await app.eval(`(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      await registration?.unregister();
+    })()`);
+    await app.reload();
+
+    await app.waitFor(
+      `(async () => !!(await navigator.serviceWorker.getRegistration())?.active)()`,
+      { timeout: 15000, label: 'service worker activation after upgrade' },
+    );
+    await app.waitFor(
+      `(async () => !(await caches.keys()).includes('ppt-v3'))()`,
+      { timeout: 15000, label: 'old app cache removal' },
+    );
+
+    const preserved = await app.run(`
+      const connection = await db.getDb();
+      const [people, locations, visits, bowls, menuItems, photos, settings] = await Promise.all([
+        db.getAll('people'),
+        db.getAll('locations'),
+        db.getAll('visits'),
+        db.getAll('bowls'),
+        db.getAll('menuItems'),
+        db.getAll('photos'),
+        db.getAll('settings'),
+      ]);
+      const photoBytes = {};
+      for (const photo of photos) {
+        photoBytes[photo.id] = {
+          blob: Array.from(new Uint8Array(await photo.blob.arrayBuffer())),
+          thumb: Array.from(new Uint8Array(await photo.thumbBlob.arrayBuffer())),
+          blobType: photo.blob.type,
+          thumbType: photo.thumbBlob.type,
+        };
+      }
+      return {
+        version: connection.version,
+        people,
+        locations,
+        visits,
+        bowls,
+        menuItems,
+        photos: photos.map(({ blob, thumbBlob, ...photo }) => photo),
+        settings,
+        photoBytes,
+      };
+    `);
+
+    assert.equal(preserved.version, 2);
+    assert.deepEqual(preserved.people.map((person) => person.id), ['legacy-person']);
+    assert.equal(preserved.people[0].passCost, 87.65);
+    assert.deepEqual(preserved.locations.map((location) => location.id), ['legacy-location']);
+    assert.equal(preserved.locations[0].defaultMealPrice, null);
+    assert.deepEqual(preserved.visits.map((visit) => visit.id), ['legacy-visit']);
+    assert.equal(preserved.visits[0].mealPrice, 12.34);
+    assert.equal(preserved.visits[0].endedAt, '2026-08-20T18:30:00.000Z');
+    assert.deepEqual(preserved.bowls.map((bowl) => bowl.id), ['legacy-bowl']);
+    assert.equal(preserved.bowls[0].toppingId, null);
+    assert.deepEqual(
+      preserved.menuItems.map((item) => item.name).sort(),
+      ['Legacy Pasta', 'Legacy Sauce'],
+    );
+    assert.deepEqual(
+      Object.fromEntries(preserved.settings.map((setting) => [setting.key, setting.value])),
+      { mealPrice: 18.76, seeded: true },
+    );
+    assert.deepEqual(
+      preserved.photos.map((photo) => photo.id).sort(),
+      ['legacy-bowl-photo', 'legacy-visit-photo'],
+    );
+    assert.deepEqual(
+      preserved.photoBytes['legacy-visit-photo'].blob,
+      app.legacyPhotoBytes.png,
+    );
+    assert.deepEqual(
+      preserved.photoBytes['legacy-visit-photo'].thumb,
+      app.legacyPhotoBytes.png,
+    );
+    assert.equal(preserved.photoBytes['legacy-visit-photo'].blobType, 'image/png');
+    assert.deepEqual(
+      preserved.photoBytes['legacy-bowl-photo'].blob,
+      app.legacyPhotoBytes.jpeg,
+    );
+    assert.deepEqual(
+      preserved.photoBytes['legacy-bowl-photo'].thumb,
+      app.legacyPhotoBytes.thumb,
+    );
+    assert.equal(preserved.photoBytes['legacy-bowl-photo'].blobType, 'image/jpeg');
+    assert.equal(preserved.photoBytes['legacy-bowl-photo'].thumbType, 'image/jpeg');
+    app.assertNoErrors();
+  });
+});
