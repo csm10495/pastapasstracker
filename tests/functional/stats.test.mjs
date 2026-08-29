@@ -121,11 +121,25 @@ test('diners are ordered by bowl count descending', async () => {
 test('singular labels render for exactly one bowl and one visit', async () => {
   await withApp(async (app) => {
     await app.goto('/stats');
-    const text = await app.text();
-    assert.match(text, /1 Total bowl/i);
-    assert.match(text, /1 Total visit/i);
-    assert.doesNotMatch(text, /1 BOWLS/i);
-    assert.doesNotMatch(text, /1 VISITS/i);
+    // Scope this to stat tiles: whole-page text can contain values such as
+    // "91 BOWLS OVER TIME", whose tail looks like the plural "1 BOWLS".
+    const tiles = await app.eval(`(() => [...document.querySelectorAll('#view .stat')]
+      .map((node) => ({
+        value: node.querySelector('.stat__value')?.textContent.trim(),
+        label: node.querySelector('.stat__label')?.textContent.trim(),
+      })))()`);
+    const labelsForOne = tiles
+      .filter((tile) => tile.value === '1')
+      .map((tile) => tile.label);
+
+    assert.ok(labelsForOne.includes('Total bowl'));
+    assert.ok(labelsForOne.includes('Total visit'));
+    assert.ok(labelsForOne.includes('Bowl'));
+    assert.ok(labelsForOne.includes('Visit'));
+    assert.ok(!labelsForOne.includes('Total bowls'));
+    assert.ok(!labelsForOne.includes('Total visits'));
+    assert.ok(!labelsForOne.includes('Bowls'));
+    assert.ok(!labelsForOne.includes('Visits'));
     app.assertNoErrors();
   }, {
     seed: {
