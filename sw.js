@@ -1,7 +1,7 @@
 /* Service worker: cache-first app shell so the tracker works with no signal.
    Bump CACHE_VERSION whenever shell assets change. */
 
-const CACHE_VERSION = 'ppt-v4';
+const CACHE_VERSION = 'ppt-v5';
 
 /* Build identity is written at deploy time and must never be served stale, or
    the app would report the wrong version after an update. */

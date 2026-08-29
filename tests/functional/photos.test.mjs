@@ -50,9 +50,9 @@ async function uploadFixture(app, selector, index, name) {
   }
 }
 
-function largeFixturePng(name = 'ppt-large-fixture.png') {
-  const width = 640;
-  const height = 640;
+function largeFixturePng(name = 'ppt-large-fixture.png', size = 640) {
+  const width = size;
+  const height = size;
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
     const row = y * (width * 4 + 1);
@@ -246,6 +246,81 @@ test('multiple photos can attach to one visit and removing one leaves the others
     assert.equal(photos[0].ownerType, 'visit');
     assert.equal(photos[0].ownerId, visit.id);
     app.assertNoErrors();
+  });
+});
+
+test('photo quality controls stored resolution and never re-encodes existing photos', async () => {
+  await withApp(async (app) => {
+    await app.seed({
+      ...FIXTURE,
+      visits: [{
+        date: '2026-09-11',
+        location: 'OG Brookfield',
+        bowls: [{ person: 'Alice', pasta: 'Fettuccine', sauce: 'Alfredo' }],
+      }],
+    });
+    const [visit] = await app.store('visits');
+    // Larger than the balanced edge but below the higher ones, so each level
+    // produces a distinguishable stored size.
+    const png = largeFixturePng('ppt-quality-source.png', 2000);
+
+    const readPhotos = () => app.run(`
+      const rows = (await db.getAll('photos')).sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+      const out = [];
+      for (const photo of rows) {
+        const full = await createImageBitmap(photo.blob);
+        const thumb = await createImageBitmap(photo.thumbBlob);
+        out.push({
+          quality: photo.quality ?? null,
+          storedWidth: photo.storedWidth ?? null,
+          sourceWidth: photo.width,
+          fullEdge: Math.max(full.width, full.height),
+          thumbEdge: Math.max(thumb.width, thumb.height),
+          size: photo.blob.size,
+          type: photo.blob.type,
+        });
+      }
+      return out;`);
+
+    const upload = async (level, expectedCount) => {
+      await app.run(`await db.setSetting('photoQuality', ${JSON.stringify(level)});`);
+      await app.goto(`/visits/${visit.id}/edit`);
+      await app.upload('input[type=file]', png.path, 0);
+      await app.waitFor(
+        `(await (await import('${app.origin}/js/db.js')).getAll('photos')).length === ${expectedCount}`,
+        { label: `photo stored at ${level}` },
+      );
+    };
+
+    try {
+      await upload('balanced', 1);
+      const [balanced] = await readPhotos();
+      assert.equal(balanced.quality, 'balanced');
+      assert.equal(balanced.fullEdge, 1400, 'balanced must keep the original 1400px behaviour');
+      assert.equal(balanced.storedWidth, 1400);
+      assert.equal(balanced.sourceWidth, 2000, 'the source dimensions stay recorded');
+      assert.equal(balanced.thumbEdge, 320);
+      assert.equal(balanced.type, 'image/jpeg');
+
+      await upload('max', 2);
+      const [existing, captured] = await readPhotos();
+
+      // The whole point: raising the setting must not touch what is already saved.
+      assert.deepEqual(existing, balanced, 'an existing photo must not be re-encoded');
+
+      assert.equal(captured.quality, 'max');
+      assert.equal(captured.fullEdge, 2000, 'a higher level must not downscale a 2000px source');
+      assert.equal(captured.storedWidth, 2000);
+      assert.equal(captured.type, 'image/jpeg');
+      assert.ok(captured.size > balanced.size,
+        `expected a larger file at max (${captured.size}) than balanced (${balanced.size})`);
+
+      // Lists decode thumbnails, so they must stay small at every level.
+      assert.equal(captured.thumbEdge, 320);
+      app.assertNoErrors();
+    } finally {
+      png.cleanup();
+    }
   });
 });
 

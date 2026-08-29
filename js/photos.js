@@ -6,15 +6,17 @@
  * code path. Owners never hold a photo id; the photo points at its owner.
  *
  * Originals are downscaled on capture and a small thumbnail is stored
- * alongside, so lists never decode full-size images.
+ * alongside, so lists never decode full-size images. How far the main image is
+ * downscaled comes from the photo quality setting, which is read when a photo
+ * is added — photos already stored keep the quality they were captured at.
  */
 
-import { getPhotosFor, deletePhotosFor, save, remove, getDb } from './db.js';
+import { getPhotosFor, deletePhotosFor, save, remove, getDb, getSetting } from './db.js';
 import { el, lightbox, toast } from './ui.js';
+import { DEFAULT_PHOTO_QUALITY, PHOTO_QUALITY_LEVELS, SETTING_KEYS } from './schema.js';
 
-const MAX_EDGE = 1400;
 const THUMB_EDGE = 320;
-const QUALITY = 0.82;
+const THUMB_QUALITY = 0.82;
 
 /**
  * Media capture hint for file inputs.
@@ -71,10 +73,21 @@ function drawScaled(img, maxEdge) {
   return canvas;
 }
 
-function toBlob(canvas) {
+function toBlob(canvas, quality) {
   return new Promise((resolve) => {
-    canvas.toBlob((b) => resolve(b), 'image/jpeg', QUALITY);
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', quality);
   });
+}
+
+/**
+ * Encoding parameters for a stored quality level.
+ *
+ * Unknown or missing values fall back to the default rather than throwing, so
+ * a setting written by a newer version, or absent entirely on an older
+ * profile, still captures photos successfully.
+ */
+export function resolvePhotoEncoding(level) {
+  return PHOTO_QUALITY_LEVELS[level] || PHOTO_QUALITY_LEVELS[DEFAULT_PHOTO_QUALITY];
 }
 
 /**
@@ -83,10 +96,12 @@ function toBlob(canvas) {
  */
 export async function addPhoto(file, ownerType, ownerId, { caption = '', seq = 0 } = {}) {
   if (!file || !ownerId) return null;
+  const encoding = resolvePhotoEncoding(await getSetting(SETTING_KEYS.photoQuality));
   const img = await loadImage(file);
+  const full = drawScaled(img, encoding.maxEdge);
   const [blob, thumbBlob] = await Promise.all([
-    toBlob(drawScaled(img, MAX_EDGE)),
-    toBlob(drawScaled(img, THUMB_EDGE)),
+    toBlob(full, encoding.quality),
+    toBlob(drawScaled(img, THUMB_EDGE), THUMB_QUALITY),
   ]);
   return save('photos', {
     ownerType,
@@ -95,6 +110,9 @@ export async function addPhoto(file, ownerType, ownerId, { caption = '', seq = 0
     thumbBlob,
     width: img.width,
     height: img.height,
+    storedWidth: full.width,
+    storedHeight: full.height,
+    quality: encoding.id,
     caption,
     seq,
   });

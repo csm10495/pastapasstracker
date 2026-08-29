@@ -80,9 +80,26 @@ export const SETTING_KEYS = {
   passCost: 'passCost',
   seasonStart: 'seasonStart',
   seasonEnd: 'seasonEnd',
+  photoQuality: 'photoQuality',
   theme: 'theme',
   seeded: 'seeded',
 };
+
+/**
+ * Photo capture quality. Photos are always re-encoded as JPEG; a level only
+ * chooses the longest edge and the encoder quality.
+ *
+ * The level applies when a photo is added, so photos captured under an older
+ * or lower setting keep exactly the quality they were stored at. Nothing
+ * re-encodes existing photos.
+ */
+export const PHOTO_QUALITY_LEVELS = {
+  balanced: Object.freeze({ id: 'balanced', label: 'Balanced', maxEdge: 1400, quality: 0.82 }),
+  high: Object.freeze({ id: 'high', label: 'High', maxEdge: 2560, quality: 0.92 }),
+  max: Object.freeze({ id: 'max', label: 'Maximum', maxEdge: 3840, quality: 0.95 }),
+};
+
+export const DEFAULT_PHOTO_QUALITY = 'high';
 
 export const DEFAULT_SETTINGS = {
   /** Fallback used only when a visit's location has no default price. */
@@ -94,6 +111,8 @@ export const DEFAULT_SETTINGS = {
   /** Pass-holder early access through the end of the promotion. */
   [SETTING_KEYS.seasonStart]: '2026-08-24',
   [SETTING_KEYS.seasonEnd]: '2026-11-22',
+  /** Applies to newly added photos only; existing photos are never re-encoded. */
+  [SETTING_KEYS.photoQuality]: DEFAULT_PHOTO_QUALITY,
 };
 
 export const OWNER_TYPES = ['visit', 'bowl', 'person', 'menuItem'];

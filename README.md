@@ -37,6 +37,9 @@ matters: *what is each bowl actually costing me?*
 - **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items. On a phone the
   photo button offers both the camera and your library. Settings can export every visit-gallery
   and bowl photo as one ZIP archive, named by photo timestamp.
+- **Adjustable photo quality.** Photos are stored as JPEG at Balanced (1400px), High (2560px,
+  the default), or Maximum (3840px), so exports keep as much detail as you want to spend
+  storage on.
 - **Season countdown.** Days remaining, pace, and projected final cost per bowl.
 - **Editable menu.** The official 2026 lineup is seeded but fully editable, because Olive Garden
   had not published the complete list before launch.
@@ -165,6 +168,22 @@ The same section can download all visit-gallery and bowl photos as a ZIP file. I
 Windows-safe UTC timestamp filenames such as `2026-08-28T19-10-26.288Z.jpg`; if two photos have
 the same timestamp and extension, later files receive `-2`, `-3`, and so on. Diner avatars and
 menu reference photos are intentionally excluded from this visit-photo archive.
+
+## Photo quality
+
+**Settings → Photos** chooses how much detail is kept when a photo is added:
+
+| Level | Longest edge | JPEG quality | Rough size |
+|---|---|---|---|
+| Balanced | 1400px | 0.82 | ~0.2 MB |
+| High *(default)* | 2560px | 0.92 | ~0.8 MB |
+| Maximum | 3840px | 0.95 | ~1.5 MB |
+
+Quality is decided when a photo is captured, so the exported ZIP is only ever as good as the
+setting in force at the time. **Changing the level never re-encodes photos you have already
+saved** — older photos simply keep the quality they were stored at, which is covered by a
+regression test. Thumbnails stay 320px at every level so lists remain fast, and photos are
+always JPEG, so exports never carry EXIF location data.
 
 ## The 2026 menu
 

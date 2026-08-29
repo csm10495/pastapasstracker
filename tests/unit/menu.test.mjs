@@ -72,6 +72,7 @@ test('DEFAULT_SETTINGS exposes the expected persisted defaults', () => {
   assert.deepEqual(Object.keys(DEFAULT_SETTINGS).sort(), [
     SETTING_KEYS.mealPrice,
     SETTING_KEYS.passCost,
+    SETTING_KEYS.photoQuality,
     SETTING_KEYS.seasonEnd,
     SETTING_KEYS.seasonStart,
     SETTING_KEYS.toppingChargeMode,

@@ -10,7 +10,7 @@ import {
   card, confirmDialog, el, field, modal, plural, toast,
 } from '../ui.js';
 import {
-  DEFAULT_SETTINGS, SETTING_KEYS, STORE_NAMES,
+  DEFAULT_PHOTO_QUALITY, DEFAULT_SETTINGS, PHOTO_QUALITY_LEVELS, SETTING_KEYS, STORE_NAMES,
 } from '../schema.js';
 import {
   applyTheme, deriveCustom, getPalettes, getTheme, resolveScheme,
@@ -60,6 +60,7 @@ export async function render(container, params) {
     appearanceCard(container),
     pricingCard(settings),
     seasonCard(settings),
+    photoCard(settings),
     await menuEditorCard(container, usedMenuIds, activeMenus, combos),
     backupCard(),
     storageDangerCard(container, usage, counts),
@@ -277,6 +278,26 @@ function seasonCard(settings) {
       settingDate('Season start date', SETTING_KEYS.seasonStart, settings, DEFAULT_SETTINGS[SETTING_KEYS.seasonStart]),
       settingDate('Season end date', SETTING_KEYS.seasonEnd, settings, DEFAULT_SETTINGS[SETTING_KEYS.seasonEnd]),
     ),
+  );
+}
+
+function photoCard(settings) {
+  const current = settings[SETTING_KEYS.photoQuality] || DEFAULT_PHOTO_QUALITY;
+  return card('Photos',
+    el('p', { class: 'muted small' },
+      'Photos are saved as JPEG. A higher setting keeps more detail for exports '
+      + 'and uses more storage per photo.'),
+    field('Photo quality', el('select', {
+      class: 'select',
+      onChange: async (e) => saveSetting(SETTING_KEYS.photoQuality, e.target.value),
+    },
+    Object.values(PHOTO_QUALITY_LEVELS).map((level) => option(
+      level.id,
+      `${level.label} — up to ${level.maxEdge}px`,
+      current,
+    ))),
+    'Applies to photos you add from now on. Photos already saved keep the quality '
+    + 'they were captured at.'),
   );
 }
 

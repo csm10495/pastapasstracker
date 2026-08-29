@@ -211,6 +211,25 @@ test('pricing and season settings persist, reload, affect dashboard countdown, a
   }, { seed: FIXTURE });
 });
 
+test('photo quality is selectable in settings and persists across reloads', async () => {
+  await withApp(async (app) => {
+    await app.goto('/settings');
+    assert.equal((await app.settings()).photoQuality, 'high', 'new profiles default to high');
+    assert.deepEqual(await selectOptionsFor(app, 'Photo quality'), [
+      'Balanced — up to 1400px',
+      'High — up to 2560px',
+      'Maximum — up to 3840px',
+    ]);
+
+    await setField(app, 'Photo quality', 'balanced');
+    assert.equal((await app.settings()).photoQuality, 'balanced');
+    await app.reload();
+    await app.goto('/settings');
+    assert.equal((await app.settings()).photoQuality, 'balanced');
+    app.assertNoErrors();
+  }, { seed: FIXTURE });
+});
+
 test('danger zone reset restores the default menu while historical bowls still render', async () => {
   await withApp(async (app) => {
     const visitId = await app.run(`const p = (await db.getAll('people'))[0];
