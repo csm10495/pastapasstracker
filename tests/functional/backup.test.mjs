@@ -38,6 +38,83 @@ async function addBlobPhoto(app) {
     return true;`);
 }
 
+async function addArchivePhotos(app) {
+  return app.run(`const [visit] = await db.getAll('visits');
+    const [bowl] = await db.getAll('bowls');
+    const [person] = await db.getAll('people');
+    const [menuItem] = await db.getAll('menuItems');
+    const rows = [
+      {
+        id: 'archive-visit-photo',
+        ownerType: 'visit',
+        ownerId: visit.id,
+        blob: new Blob([Uint8Array.from([1, 2, 3])], { type: 'image/png' }),
+        createdAt: '2026-08-24T12:34:56.789Z',
+      },
+      {
+        id: 'archive-bowl-photo',
+        ownerType: 'bowl',
+        ownerId: bowl.id,
+        blob: new Blob([Uint8Array.from([4, 5, 6])], { type: 'image/jpeg' }),
+        createdAt: '2026-08-24T13:00:00.000Z',
+      },
+      {
+        id: 'archive-avatar-photo',
+        ownerType: 'person',
+        ownerId: person.id,
+        blob: new Blob([Uint8Array.from([7])], { type: 'image/png' }),
+        createdAt: '2026-08-24T14:00:00.000Z',
+      },
+      {
+        id: 'archive-menu-photo',
+        ownerType: 'menuItem',
+        ownerId: menuItem.id,
+        blob: new Blob([Uint8Array.from([8])], { type: 'image/png' }),
+        createdAt: '2026-08-24T15:00:00.000Z',
+      },
+    ];
+    for (const row of rows) {
+      await db.put('photos', {
+        ...row,
+        thumbBlob: row.blob,
+        width: 1,
+        height: 1,
+        caption: '',
+        seq: 0,
+        updatedAt: row.createdAt,
+      });
+    }
+    return true;`);
+}
+
+function readStoredZip(byteValues) {
+  const bytes = Buffer.from(byteValues);
+  const endOffset = bytes.length - 22;
+  assert.equal(bytes.readUInt32LE(endOffset), 0x06054b50);
+
+  const count = bytes.readUInt16LE(endOffset + 10);
+  let offset = bytes.readUInt32LE(endOffset + 16);
+  const entries = [];
+  for (let index = 0; index < count; index++) {
+    assert.equal(bytes.readUInt32LE(offset), 0x02014b50);
+    const size = bytes.readUInt32LE(offset + 24);
+    const nameLength = bytes.readUInt16LE(offset + 28);
+    const extraLength = bytes.readUInt16LE(offset + 30);
+    const commentLength = bytes.readUInt16LE(offset + 32);
+    const localOffset = bytes.readUInt32LE(offset + 42);
+    const name = bytes.subarray(offset + 46, offset + 46 + nameLength).toString();
+    const localNameLength = bytes.readUInt16LE(localOffset + 26);
+    const localExtraLength = bytes.readUInt16LE(localOffset + 28);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    entries.push({
+      name,
+      data: [...bytes.subarray(dataOffset, dataOffset + size)],
+    });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
 test('export counts match live stores and includesPhotos follows the selected mode', async () => {
   await withApp(async (app) => {
     await addBlobPhoto(app);
@@ -154,6 +231,77 @@ test('data-only backups restore all non-photo stores and no photo rows', async (
       assert.equal(after[store], expected[store], store);
     }
     assert.equal(after.photos, 0);
+    app.assertNoErrors();
+  }, { seed: FIXTURE });
+});
+
+test('visit photo archive includes visit and bowl photos named by timestamp, excluding unrelated photos', async () => {
+  await withApp(async (app) => {
+    await addArchivePhotos(app);
+    const archive = await app.run(`const result = await transfer.buildVisitPhotoArchive();
+      const bytes = new Uint8Array(await result.blob.arrayBuffer());
+      return {
+        count: result.count,
+        files: result.files,
+        type: result.blob.type,
+        bytes: Array.from(bytes),
+      };`);
+    const entries = readStoredZip(archive.bytes);
+
+    assert.equal(archive.count, 2);
+    assert.deepEqual(
+      entries.map((entry) => entry.name),
+      [
+        '2026-08-24T12-34-56.789Z.png',
+        '2026-08-24T13-00-00.000Z.jpg',
+      ],
+    );
+    assert.deepEqual(entries.map((entry) => entry.data), [[1, 2, 3], [4, 5, 6]]);
+    assert.deepEqual(archive.files.map((file) => file.name), entries.map((entry) => entry.name));
+    assert.deepEqual(archive.files.map((file) => file.ownerType), ['visit', 'bowl']);
+    assert.equal(archive.type, 'application/zip');
+    app.assertNoErrors();
+  }, { seed: FIXTURE });
+});
+
+test('settings downloads the visit photo ZIP and reports when there are no photos to export', async () => {
+  await withApp(async (app) => {
+    await addArchivePhotos(app);
+    await app.goto('/settings');
+    await app.eval(`(() => {
+      window.__photoArchiveDownloads = [];
+      URL.createObjectURL = (blob) => {
+        window.__photoArchiveBlob = blob;
+        return 'blob:pasta-pass-photo-archive';
+      };
+      HTMLAnchorElement.prototype.click = function () {
+        window.__photoArchiveDownloads.push({ filename: this.download, href: this.href });
+      };
+    })()`);
+
+    await app.click('Download all visit photos');
+    await app.waitFor('window.__photoArchiveDownloads.length === 1', { label: 'photo archive download' });
+    const download = await app.eval(`(async () => {
+      const bytes = new Uint8Array(await window.__photoArchiveBlob.arrayBuffer());
+      return {
+        ...window.__photoArchiveDownloads[0],
+        type: window.__photoArchiveBlob.type,
+        signature: Array.from(bytes.slice(0, 4)),
+      };
+    })()`);
+    assert.match(download.filename, /^pasta-pass-visit-photos-\d{4}-\d{2}-\d{2}\.zip$/);
+    assert.equal(download.href, 'blob:pasta-pass-photo-archive');
+    assert.equal(download.type, 'application/zip');
+    assert.deepEqual(download.signature, [0x50, 0x4b, 0x03, 0x04]);
+    assert.match(await app.toastText(), /2 photos downloaded/);
+
+    await app.run("await db.clearStore('photos');");
+    await app.click('Download all visit photos');
+    await app.waitFor(
+      "document.getElementById('toast-host').textContent.includes('No visit or bowl photos')",
+      { label: 'empty photo archive message' },
+    );
+    assert.equal(await app.eval('window.__photoArchiveDownloads.length'), 1);
     app.assertNoErrors();
   }, { seed: FIXTURE });
 });

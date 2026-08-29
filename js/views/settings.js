@@ -7,7 +7,7 @@ import {
 } from '../menu.js';
 import { photoPicker } from '../photos.js';
 import {
-  card, confirmDialog, el, field, modal, toast,
+  card, confirmDialog, el, field, modal, plural, toast,
 } from '../ui.js';
 import {
   DEFAULT_SETTINGS, SETTING_KEYS, STORE_NAMES,
@@ -16,7 +16,8 @@ import {
   applyTheme, deriveCustom, getPalettes, getTheme, resolveScheme,
 } from '../theme.js';
 import {
-  downloadBackup, inspectBackup, readBackupFile, restoreBackup, wipeEverything,
+  downloadBackup, downloadVisitPhotoArchive, inspectBackup, readBackupFile,
+  restoreBackup, wipeEverything,
 } from '../transfer.js';
 import {
   REPO_URL, canInstall, getBuildInfo, isInstalled, isIos, onInstallChange, promptInstall,
@@ -495,8 +496,36 @@ function backupCard() {
         },
       }, 'Download data only (smaller)'),
     ),
+    el('div', { class: 'divider' }),
+    el('p', { class: 'muted small' },
+      'Download every visit-gallery and bowl photo in one ZIP file. '
+      + 'Avatars and menu photos are not included.'),
+    el('div', { class: 'btn-row' },
+      el('button', {
+        type: 'button',
+        class: 'btn',
+        onClick: downloadPhotoArchive,
+      }, 'Download all visit photos (.zip)'),
+    ),
     field('Import backup', fileInput, 'Choose a JSON backup to preview it before restoring.'),
   );
+}
+
+async function downloadPhotoArchive(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const archive = await downloadVisitPhotoArchive();
+    if (!archive.count) {
+      toast('No visit or bowl photos to export.');
+      return;
+    }
+    toast(`${plural(archive.count, 'photo')} downloaded`);
+  } catch (err) {
+    toast(err.message || 'Could not export photos', 'bad');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function previewRestore(parsed, summary) {

@@ -182,6 +182,34 @@ export async function getPhotosFor(ownerType, ownerId) {
   return rows.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
 }
 
+/**
+ * Reads photos for selected owner categories without retaining unrelated
+ * photo blobs in memory. Useful for exports that intentionally omit avatars
+ * and menu reference images.
+ */
+export async function getPhotosByOwnerTypes(ownerTypes) {
+  const allowed = new Set(ownerTypes || []);
+  if (!allowed.size) return [];
+
+  const db = await getDb();
+  const tx = db.transaction('photos', 'readonly');
+  const req = tx.objectStore('photos').openCursor();
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve(rows);
+        return;
+      }
+      if (allowed.has(cursor.value.ownerType)) rows.push(cursor.value);
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+    tx.onabort = () => reject(tx.error || new Error('Photo read transaction aborted'));
+  });
+}
+
 /** Deletes every photo attached to an owner. Used by cascade deletes. */
 export async function deletePhotosFor(ownerType, ownerId) {
   const rows = await getPhotosFor(ownerType, ownerId);

@@ -35,7 +35,8 @@ matters: *what is each bowl actually costing me?*
 - **120-combo explorer.** A grid of every pasta × sauce × topping combination, tracking which
   you have tried, with a "suggest something new" button.
 - **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items. On a phone the
-  photo button offers both the camera and your library.
+  photo button offers both the camera and your library. Settings can export every visit-gallery
+  and bowl photo as one ZIP archive, named by photo timestamp.
 - **Season countdown.** Days remaining, pace, and projected final cost per bowl.
 - **Editable menu.** The official 2026 lineup is seeded but fully editable, because Olive Garden
   had not published the complete list before launch.
@@ -155,6 +156,11 @@ and no sync. **Clearing your browser's site data will erase everything.**
 
 Use **Settings → Backup & restore** to export a JSON file. Backups embed photos by default; a
 "data only" export is available when you want a small file. Import offers *replace* or *merge*.
+
+The same section can download all visit-gallery and bowl photos as a ZIP file. Images use
+Windows-safe UTC timestamp filenames such as `2026-08-28T19-10-26.288Z.jpg`; if two photos have
+the same timestamp and extension, later files receive `-2`, `-3`, and so on. Diner avatars and
+menu reference photos are intentionally excluded from this visit-photo archive.
 
 ## The 2026 menu
 
