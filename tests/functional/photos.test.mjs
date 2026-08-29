@@ -241,6 +241,10 @@ test('multiple photos can attach to one visit and removing one leaves the others
     assert.equal((await app.store('photos')).length, 2);
 
     await app.clickSelector('.photo-slot__remove', 0);
+    await app.waitFor(
+      `(await (await import('${app.origin}/js/db.js')).getAll('photos')).length === 1`,
+      { label: 'photo removed' },
+    );
     const photos = await app.store('photos');
     assert.equal(photos.length, 1);
     assert.equal(photos[0].ownerType, 'visit');

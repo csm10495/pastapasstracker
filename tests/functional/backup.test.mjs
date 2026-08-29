@@ -209,7 +209,13 @@ test('the settings import file input previews and restores a real JSON backup', 
       await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'restore preview' });
       assert.match(await app.text('#modal-host'), /Restore backup/i);
       await app.click('Replace everything', '#modal-host button');
-      await app.waitFor("document.getElementById('toast-host').textContent.includes('Restored') || document.readyState === 'complete'");
+      // `document.readyState === 'complete'` is true immediately, so the old
+      // condition let the assertion run before the restore had committed.
+      await app.waitFor(`(async () => {
+        const module = await import('${app.origin}/js/db.js');
+        const people = await module.getAll('people');
+        return people.length === 1 && people[0].name === 'Imported UI Person';
+      })()`, { label: 'backup restored' });
       assert.deepEqual((await app.store('people')).map((p) => p.name), ['Imported UI Person']);
       app.assertNoErrors();
     }, { seed: FIXTURE });

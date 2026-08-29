@@ -89,7 +89,13 @@ class App {
     const deadline = Date.now() + timeout;
     let last;
     while (Date.now() < deadline) {
-      last = await this.cdp.eval(`(async () => { try { return (${expression}); } catch { return false; } })()`);
+      try {
+        last = await this.cdp.eval(`(async () => { try { return (${expression}); } catch { return false; } })()`);
+      } catch {
+        // A reload or navigation destroys the execution context, which rejects
+        // the evaluation itself. Keep polling instead of failing the test.
+        last = false;
+      }
       if (last) return last;
       await sleep(interval);
     }

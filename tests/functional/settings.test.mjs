@@ -56,6 +56,30 @@ async function selectOptionsFor(app, label) {
   })()`);
 }
 
+/**
+ * Menu row actions and the danger-zone buttons are async: the click handler
+ * writes to IndexedDB and then re-renders Settings in place. Reading straight
+ * after the click can therefore observe the pre-mutation state, so wait for the
+ * mutation itself to land.
+ */
+async function waitForMenuNames(app, kind, expression, label) {
+  await app.waitFor(`(async () => {
+    const module = await import('${app.origin}/js/menu.js');
+    const names = (await module.listMenu(${JSON.stringify(kind)})).map((item) => item.name);
+    return ${expression};
+  })()`, { label });
+}
+
+/** Waits for setting writes, which are async, to be committed. */
+async function waitForSettings(app, expected) {
+  await app.waitFor(`(async () => {
+    const module = await import('${app.origin}/js/db.js');
+    const settings = await module.getSettings();
+    return Object.entries(${JSON.stringify(expected)})
+      .every(([key, value]) => settings[key] === value);
+  })()`, { label: `settings ${Object.keys(expected).join(', ')}` });
+}
+
 async function addMenuItem(app, kind, name) {
   await app.goto('/settings');
   await app.click(`Add ${kind}`);
@@ -82,6 +106,7 @@ test('menu editor mutations update pickers, cached menu data, history, and combo
     await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'rename modal' });
     await app.setInput('#modal-host input[type=text]', 'Fettuccine Finale');
     await app.click('Save', '#modal-host button');
+    await waitForMenuNames(app, 'pasta', "names.includes('Fettuccine Finale')", 'rename applied');
     active = await app.run("return (await menu.listMenu('pasta')).map((i) => i.name);");
     assert.ok(active.includes('Fettuccine Finale'));
 
@@ -93,6 +118,7 @@ test('menu editor mutations update pickers, cached menu data, history, and combo
     await clickRowButton(app, 'Bucatini', 'Retire');
     await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'retire modal' });
     await app.click('Retire', '#modal-host button');
+    await waitForMenuNames(app, 'pasta', "!names.includes('Bucatini')", 'retire applied');
     active = await app.run("return (await menu.listMenu('pasta')).map((i) => i.name);");
     assert.ok(!active.includes('Bucatini'));
     const retired = await app.run("return (await db.getAll('menuItems')).find((i) => i.name === 'Bucatini');");
@@ -104,7 +130,10 @@ test('menu editor mutations update pickers, cached menu data, history, and combo
 
     await app.goto('/settings');
     await clickRowButton(app, 'Bucatini', 'Restore');
-    await app.waitFor("document.getElementById('view').innerText.includes('Bucatini')");
+    // The row action is async, and a retired item is already listed under
+    // "Retired", so waiting on the item name alone would pass against the
+    // pre-restore DOM. Wait for the restore to actually land instead.
+    await waitForMenuNames(app, 'pasta', "names.includes('Bucatini')", 'Bucatini restored');
     active = await app.run("return (await menu.listMenu('pasta')).map((i) => i.name);");
     assert.ok(active.includes('Bucatini'));
 
@@ -115,7 +144,15 @@ test('menu editor mutations update pickers, cached menu data, history, and combo
       c: await menu.comboCount(),
     };`);
     assert.equal(counts.c, counts.p * counts.s * (counts.t + 1));
-    assert.match(await app.text(), new RegExp(`${counts.p} pastas x ${counts.s} sauces x ${counts.t + 1} topping options = ${counts.c}`));
+    const comboText = `${counts.p} pastas x ${counts.s} sauces x ${counts.t + 1} topping options = ${counts.c}`;
+    // Settings re-renders in place after a menu edit, and renderFresh() empties
+    // the container before it repaints. Reading a snapshot here would sometimes
+    // catch that empty window on a slow machine.
+    await app.waitFor(
+      `document.getElementById('view').innerText.includes(${JSON.stringify(comboText)})`,
+      { label: 'settings re-render after restore' },
+    );
+    assert.match(await app.text(), new RegExp(comboText));
     app.assertNoErrors();
   }, { seed: FIXTURE });
 });
@@ -139,6 +176,11 @@ test('delete forever is offered only for unreferenced menu items', async () => {
     await clickRowButton(app, 'Creamy Mushroom', 'Delete forever');
     await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'delete modal' });
     await app.click('Delete forever', '#modal-host button');
+    await app.waitFor(`(async () => {
+      const module = await import('${app.origin}/js/db.js');
+      const rows = await module.getAll('menuItems');
+      return !rows.some((item) => item.name === 'Creamy Mushroom');
+    })()`, { label: 'menu item hard-deleted' });
     const sauces = await app.run("return (await db.getAll('menuItems')).filter((i) => i.kind === 'sauce').map((i) => i.name);");
     assert.ok(!sauces.includes('Creamy Mushroom'));
     app.assertNoErrors();
@@ -168,6 +210,11 @@ test('appearance choices apply to the document, meta theme color, localStorage, 
     assert.notEqual(await app.eval("document.querySelector('meta[name=theme-color]').content"), metaBefore);
 
     await app.click('Custom', '.chip');
+    // Choosing the custom palette re-renders Settings; the accent input only
+    // exists in that refreshed view.
+    await app.waitFor(`[...document.querySelectorAll('#view .field__label')]
+      .some((node) => node.textContent.trim() === 'Custom palette accent')`,
+    { label: 'custom accent field' });
     await setField(app, 'Custom palette accent', '#336699');
     assert.equal(await app.eval("document.documentElement.style.getPropertyValue('--accent').trim()"), '#336699');
     await app.reload();
@@ -192,6 +239,15 @@ test('pricing and season settings persist, reload, affect dashboard countdown, a
     await setField(app, 'Pass cost', '125');
     await setField(app, 'Season start date', start);
     await setField(app, 'Season end date', end);
+
+    await waitForSettings(app, {
+      mealPrice: 19.99,
+      toppingPrice: 6.5,
+      toppingChargeMode: 'perBowl',
+      passCost: 125,
+      seasonStart: start,
+      seasonEnd: end,
+    });
 
     let settings = await app.settings();
     assert.equal(settings.mealPrice, 19.99);
@@ -222,6 +278,7 @@ test('photo quality is selectable in settings and persists across reloads', asyn
     ]);
 
     await setField(app, 'Photo quality', 'balanced');
+    await waitForSettings(app, { photoQuality: 'balanced' });
     assert.equal((await app.settings()).photoQuality, 'balanced');
     await app.reload();
     await app.goto('/settings');
@@ -242,6 +299,7 @@ test('danger zone reset restores the default menu while historical bowls still r
     await app.click('Reset menu to the 2026 defaults');
     await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'reset modal' });
     await app.click('Reset menu', '#modal-host button');
+    await waitForMenuNames(app, 'pasta', "names.length === 4 && !names.includes('Lost Pasta')", 'menu reset');
     const counts = await app.run(`return {
       pastas: (await menu.listMenu('pasta')).length,
       sauces: (await menu.listMenu('sauce')).length,
@@ -265,6 +323,13 @@ test('erase all data can be cancelled and confirmed restore-seeds the app to a u
     await app.click('Erase all data');
     await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'erase modal' });
     await app.click('Erase all data', '#modal-host button');
+    await app.waitFor(`(async () => {
+      const dbModule = await import('${app.origin}/js/db.js');
+      const menuModule = await import('${app.origin}/js/menu.js');
+      const people = await dbModule.getAll('people');
+      const pastas = await menuModule.listMenu('pasta');
+      return people.length === 0 && pastas.length === 4;
+    })()`, { label: 'data erased and menu reseeded' });
     const counts = await app.run(`const out = {};
       for (const s of ['people', 'locations', 'visits', 'bowls', 'photos']) out[s] = (await db.getAll(s)).length;
       out.pastas = (await menu.listMenu('pasta')).length;

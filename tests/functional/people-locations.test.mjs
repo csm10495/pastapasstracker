@@ -21,6 +21,7 @@ test('creating a diner through the modal persists the entered name and pass deta
   await withApp(async (app) => {
     await app.goto('/people');
     await app.click('Add diner');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'diner modal' });
     assert.doesNotMatch(await app.text('#modal-host'), /Pass cost/);
 
     await app.clickSelector('#modal-host input[type=checkbox]', 0);
@@ -35,6 +36,10 @@ test('creating a diner through the modal persists the entered name and pass deta
     assert.equal(people[0].name, 'Carla');
     assert.equal(people[0].hasPass, true);
     assert.equal(people[0].passCost, 125.50);
+    // The list re-renders in place after the modal saves, so wait for the
+    // refreshed view instead of reading it mid-render.
+    await app.waitFor("document.getElementById('view').innerText.includes('Carla')",
+      { label: 'diner list refreshed' });
     assert.match(await app.text(), /Carla/);
 
     await app.click('Carla');
@@ -82,6 +87,8 @@ test('editing a diner renames them and flips pass status', async () => {
     const alice = (await app.store('people')).find((p) => p.name === 'Alice Updated');
     assert.ok(alice);
     assert.equal(alice.hasPass, false);
+    await app.waitFor("document.getElementById('view').innerText.includes('Alice Updated')",
+      { label: 'diner list refreshed' });
     assert.match(await app.text(), /Alice Updated/);
     app.assertNoErrors();
   }, { seed: BASE_VISIT });

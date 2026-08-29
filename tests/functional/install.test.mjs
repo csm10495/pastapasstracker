@@ -76,9 +76,14 @@ test('settings shows an install button when a deferred prompt is available and a
       .find((button) => button.textContent.includes('Install app'))`, { label: 'install button' });
 
     await app.click('Install app', '[data-install-card] button');
+    // The handler awaits the prompt's userChoice before replacing the card.
+    await app.waitFor("document.getElementById('toast-host').textContent.includes('Installing')",
+      { label: 'installing toast' });
 
     assert.equal(await app.eval('window.__pptPromptCalls'), 1);
     assert.match(await app.toastText(), /Installing/);
+    await app.waitFor("!document.querySelector('[data-install-card] button')",
+      { label: 'install card refreshed' });
     assert.equal(await app.exists('[data-install-card] button'), false);
     app.assertNoErrors();
   });
@@ -93,6 +98,8 @@ test('settings reports when the install prompt is dismissed', async () => {
     });
 
     await app.click('Install app', '[data-install-card] button');
+    await app.waitFor("document.getElementById('toast-host').textContent.includes('Install dismissed')",
+      { label: 'dismissed toast' });
 
     assert.match(await app.toastText(), /Install dismissed/);
     assert.equal(await app.eval('window.__pptInstallPrompt'), null);
