@@ -1,17 +1,21 @@
-import { getAll } from '../db.js';
-import { comboKey, listMenu } from '../menu.js';
+import { getAll, getSetting, setSetting } from '../db.js';
+import {
+  allowedComboCount, allowedItems, comboKey, exclusionKey, listMenu, untriedSuggestions,
+} from '../menu.js';
 import { barChart, donut } from '../charts.js';
 import { clear, el, empty, modal, plural } from '../ui.js';
+import { SETTING_KEYS } from '../schema.js';
 
 export async function render(container, params) {
   void params;
 
-  const [pastas, sauces, toppings, bowls, people] = await Promise.all([
+  const [pastas, sauces, toppings, bowls, people, savedExclusions] = await Promise.all([
     listMenu('pasta'),
     listMenu('sauce'),
     listMenu('topping'),
     getAll('bowls'),
     getAll('people'),
+    getSetting(SETTING_KEYS.comboExclusions),
   ]);
 
   const activePeople = people
@@ -24,6 +28,9 @@ export async function render(container, params) {
   const menuItemCount = pastas.length + sauces.length + toppings.length;
 
   let selectedPersonId = null;
+  // A menu item retired since the preference was saved simply stops matching,
+  // so a stale key is harmless and is dropped the next time this is written.
+  let exclusions = new Set(Array.isArray(savedExclusions) ? savedExclusions : []);
 
   container.append(el('header', { class: 'spread' },
     el('div', {},
@@ -50,6 +57,12 @@ export async function render(container, params) {
   const host = el('div', { class: 'stack' });
   container.append(host);
 
+  const setExclusions = async (next) => {
+    exclusions = next;
+    await setSetting(SETTING_KEYS.comboExclusions, [...next]);
+    redraw();
+  };
+
   const redraw = () => {
     clear(host);
     const scopedBowls = selectedPersonId
@@ -65,7 +78,10 @@ export async function render(container, params) {
         selectedPersonId = personId;
         redraw();
       }),
-      suggestCard({ pastas, sauces, toppingOptions, triedCombos, totalCombos }),
+      suggestCard({
+        pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions,
+      }),
+      preferencesCard({ pastas, sauces, toppingOptions, exclusions, setExclusions }),
     );
 
     if (!bowls.length) {
@@ -82,6 +98,7 @@ export async function render(container, params) {
       triedCombos,
       bowls: scopedBowls,
       peopleById,
+      exclusions,
     }));
 
     host.append(exploredCard({ pastas, sauces, bowls: scopedBowls }));
@@ -141,41 +158,113 @@ function chip(label, pressed, onClick) {
   }, label);
 }
 
-function suggestCard({ pastas, sauces, toppingOptions, triedCombos, totalCombos }) {
+function suggestCard({ pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions }) {
+  const allowed = allowedComboCount({ pastas, sauces, toppingOptions, exclusions });
+  const filtered = exclusions.size > 0;
   return el('div', { class: 'card' },
     el('div', { class: 'spread', style: { gap: '.75rem', flexWrap: 'wrap' } },
       el('div', {},
         el('div', { class: 'card__title' }, 'Suggest something new'),
-        el('p', { class: 'muted small' }, 'Pick a random untried combo for the current filter.'),
+        el('p', { class: 'muted small' },
+          filtered
+            ? `Picks from the ${allowed} of ${totalCombos} combos you eat.`
+            : 'Pick a random untried combo for the current filter.'),
       ),
       el('button', {
         type: 'button',
         class: 'btn btn--primary',
-        onClick: () => suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos }),
+        onClick: () => suggestCombo({
+          pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions,
+        }),
       }, 'Suggest something new'),
     ),
   );
 }
 
-function suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos }) {
-  const untried = [];
-  for (const pasta of pastas) {
-    for (const sauce of sauces) {
-      for (const topping of toppingOptions) {
-        const key = comboKey(pasta.id, sauce.id, topping.id);
-        if (!triedCombos.has(key)) untried.push({ pasta, sauce, topping });
-      }
-    }
+/**
+ * Ingredient opt-outs.
+ *
+ * Retiring an item in Settings would hide it from logging entirely and shrink
+ * the advertised combo total. This is the softer control: the ingredient stays
+ * loggable and still counts towards coverage, but suggestions skip it.
+ */
+function preferencesCard({ pastas, sauces, toppingOptions, exclusions, setExclusions }) {
+  const toggle = (item) => {
+    const next = new Set(exclusions);
+    const key = exclusionKey(item);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setExclusions(next);
+  };
+
+  const group = (label, items) => {
+    const kept = allowedItems(items, exclusions).length;
+    return el('div', {},
+      el('div', { class: 'spread', style: { gap: '.5rem', flexWrap: 'wrap' } },
+        el('h3', { style: { marginBottom: '.35rem' } }, label),
+        el('span', { class: 'small muted' }, `${kept} of ${items.length}`),
+      ),
+      el('div', { class: 'chips', role: 'group', 'aria-label': `${label} used for suggestions` },
+        items.map((item) => chip(
+          item.name,
+          !exclusions.has(exclusionKey(item)),
+          () => toggle(item),
+        )),
+      ),
+    );
+  };
+
+  const details = el('details', { class: 'card' },
+    el('summary', {
+      style: { cursor: 'pointer', minHeight: '44px', paddingTop: '.6rem', fontWeight: '650' },
+    },
+    exclusions.size
+      ? `Ingredients — skipping ${plural(exclusions.size, 'ingredient')}`
+      : 'Ingredients — using everything'),
+    el('p', { class: 'muted small', style: { marginTop: '.75rem' } },
+      'Turn off anything you would rather not eat and suggestions will skip it. '
+      + 'Your logged bowls and combo coverage are unaffected.'),
+    el('div', { class: 'stack' },
+      group('Pastas', pastas),
+      group('Sauces', sauces),
+      group('Toppings', toppingOptions),
+    ),
+    exclusions.size
+      ? el('div', { class: 'btn-row', style: { marginTop: '.75rem' } },
+        el('button', {
+          type: 'button',
+          class: 'btn btn--sm',
+          onClick: () => setExclusions(new Set()),
+        }, 'Use everything again'),
+      )
+      : null,
+  );
+  // Keep the panel open across the redraw a toggle triggers, so a diner can
+  // switch several ingredients off without reopening it each time.
+  details.open = exclusions.size > 0;
+  return details;
+}
+
+function suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions }) {
+  const allowed = allowedComboCount({ pastas, sauces, toppingOptions, exclusions });
+
+  if (!allowed) {
+    notice('No combos match',
+      'Every pasta, sauce, or topping is switched off. Turn at least one of each back on '
+      + 'under Ingredients.');
+    return;
   }
 
+  const untried = untriedSuggestions({
+    pastas, sauces, toppingOptions, tried: triedCombos, exclusions: [...exclusions],
+  });
+
   if (!untried.length) {
-    modal((close) => el('div', {},
-      el('h2', {}, 'All combos tried!'),
-      el('p', {}, `You've tried all ${totalCombos} — incredible.`),
-      el('div', { class: 'btn-row btn-row--end' },
-        el('button', { type: 'button', class: 'btn btn--primary', onClick: () => close() }, 'Nice'),
-      ),
-    ));
+    notice('All combos tried!',
+      exclusions.size
+        ? `You've tried all ${allowed} combos that match your ingredients.`
+        : `You've tried all ${totalCombos} — incredible.`,
+      'Nice');
     return;
   }
 
@@ -190,16 +279,27 @@ function suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos
   ));
 }
 
-function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById }) {
+function notice(title, message, confirmLabel = 'Close') {
+  modal((close) => el('div', {},
+    el('h2', {}, title),
+    el('p', {}, message),
+    el('div', { class: 'btn-row btn-row--end' },
+      el('button', { type: 'button', class: 'btn btn--primary', onClick: () => close() }, confirmLabel),
+    ),
+  ));
+}
+
+function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }) {
   const wrapper = el('div', { class: 'stack' });
   for (const pasta of pastas) {
     wrapper.append(el('section', { class: 'card' },
       el('h2', { style: { display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap' } },
         pasta.name,
         newBadge(pasta),
+        skipBadge(pasta, exclusions),
       ),
       el('div', { style: { overflowX: 'auto', paddingBottom: '.2rem' } },
-        matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById }),
+        matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }),
       ),
     ));
   }
@@ -212,7 +312,7 @@ function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById
   return wrapper;
 }
 
-function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById }) {
+function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }) {
   const grid = el('div', {
     role: 'grid',
     style: {
@@ -230,7 +330,7 @@ function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleB
       class: 'small',
       role: 'columnheader',
       style: { fontWeight: '650', textAlign: 'center' },
-    }, nameWithBadge(topping)));
+    }, nameWithBadge(topping), skipBadge(topping, exclusions)));
   }
 
   for (const sauce of sauces) {
@@ -243,7 +343,7 @@ function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleB
         gap: '.35rem',
         fontWeight: '650',
       },
-    }, sauce.name, newBadge(sauce)));
+    }, sauce.name, newBadge(sauce), skipBadge(sauce, exclusions)));
 
     for (const topping of toppingOptions) {
       const key = comboKey(pasta.id, sauce.id, topping.id);
@@ -368,6 +468,12 @@ function nameWithBadge(item) {
 
 function newBadge(item) {
   return item?.isNew ? el('span', { class: 'badge' }, 'NEW') : null;
+}
+
+/** Marks an ingredient the suggester has been told to skip. */
+function skipBadge(item, exclusions) {
+  if (!exclusions?.has(exclusionKey(item))) return null;
+  return el('span', { class: 'badge', title: 'Skipped by suggestions' }, 'SKIPPED');
 }
 
 function comboName({ pasta, sauce, topping }) {

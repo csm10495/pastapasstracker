@@ -78,6 +78,35 @@ const SHOTS = [
   { name: 'visits', route: '/visits', palette: 'marinara', mode: 'light' },
   { name: 'stats', route: '/stats', palette: 'marinara', mode: 'light' },
   { name: 'combos', route: '/combos', palette: 'basil', mode: 'light', scrollTo: 420 },
+  {
+    name: 'combo-ingredients',
+    route: '/combos',
+    palette: 'basil',
+    mode: 'light',
+    // Opt two ingredients out so the panel shows what a real preference looks
+    // like, then open it and bring it into view.
+    prepare: (origin) => `(async () => {
+      const db = await import('${origin}/js/db.js');
+      const menu = await import('${origin}/js/menu.js');
+      const [sauces, toppings] = await Promise.all([
+        menu.listMenu('sauce'), menu.listMenu('topping'),
+      ]);
+      const skip = [
+        sauces.find((item) => item.name === 'Creamy Mushroom'),
+        toppings.find((item) => item.name === 'Italian Sausage'),
+      ].filter(Boolean).map((item) => item.id);
+      await db.setSetting('comboExclusions', skip);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      const details = [...document.querySelectorAll('#view details')]
+        .find((node) => node.querySelector('summary')?.textContent.includes('Ingredients'));
+      if (details) {
+        details.open = true;
+        details.scrollIntoView({ block: 'center' });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    })()`,
+  },
   { name: 'dashboard-dark', route: '/', palette: 'marinara', mode: 'dark' },
   { name: 'stats-dark', route: '/stats', palette: 'chianti', mode: 'dark' },
   { name: 'settings-dark', route: '/settings', palette: 'breadstick', mode: 'dark' },
@@ -205,6 +234,11 @@ try {
         if (btn) btn.click();
       })()`);
       await sleep(1400);
+    }
+
+    if (shot.prepare) {
+      await cdp.eval(shot.prepare(server.origin));
+      await sleep(400);
     }
 
     if (shot.scrollTo) {

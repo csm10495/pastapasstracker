@@ -117,3 +117,72 @@ export async function comboCount() {
 export function comboKey(pastaId, sauceId, toppingId) {
   return `${pastaId || ''}|${sauceId || ''}|${toppingId || ''}`;
 }
+
+/* ------------------------------------------------ suggestion filtering -- */
+
+/**
+ * Stands in for the "no topping" option, which is a real combo choice but has
+ * no menu item id of its own.
+ */
+export const NO_TOPPING_KEY = 'no-topping';
+
+/** Stable key used to opt an ingredient out of suggestions. */
+export function exclusionKey(item) {
+  return (item && item.id) || NO_TOPPING_KEY;
+}
+
+function excluder(exclusions) {
+  // Callers pass a Set (live UI state) or an array (the persisted setting),
+  // and Array.isArray is false for a Set, so accept both explicitly.
+  const skip = exclusions instanceof Set
+    ? exclusions
+    : new Set(Array.isArray(exclusions) ? exclusions : []);
+  return (item) => skip.has(exclusionKey(item));
+}
+
+/** Ingredients of one kind that suggestions are still allowed to pick. */
+export function allowedItems(items = [], exclusions = []) {
+  const isExcluded = excluder(exclusions);
+  return items.filter((item) => !isExcluded(item));
+}
+
+/**
+ * Combinations a suggestion may offer: every allowed pasta x sauce x topping
+ * that has not been tried yet.
+ *
+ * Opting an ingredient out only narrows suggestions. Coverage and the combo
+ * matrix still count the full menu, because those record what the promotion
+ * actually offers rather than what one diner will order.
+ */
+export function untriedSuggestions({
+  pastas = [],
+  sauces = [],
+  toppingOptions = [],
+  tried = new Set(),
+  exclusions = [],
+} = {}) {
+  const isExcluded = excluder(exclusions);
+  const out = [];
+  for (const pasta of pastas) {
+    if (isExcluded(pasta)) continue;
+    for (const sauce of sauces) {
+      if (isExcluded(sauce)) continue;
+      for (const topping of toppingOptions) {
+        if (isExcluded(topping)) continue;
+        if (!tried.has(comboKey(pasta.id, sauce.id, topping.id))) {
+          out.push({ pasta, sauce, topping });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** How many combinations remain once opted-out ingredients are removed. */
+export function allowedComboCount({
+  pastas = [], sauces = [], toppingOptions = [], exclusions = [],
+} = {}) {
+  return allowedItems(pastas, exclusions).length
+    * allowedItems(sauces, exclusions).length
+    * allowedItems(toppingOptions, exclusions).length;
+}

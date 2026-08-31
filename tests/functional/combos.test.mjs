@@ -68,6 +68,129 @@ async function trimMenuTo(app, { pastaName, sauceName, keepToppings = [] }) {
   `);
 }
 
+async function openIngredients(app) {
+  await app.eval(`(() => {
+    const details = [...document.querySelectorAll('#view details')]
+      .find((node) => node.querySelector('summary')?.textContent.includes('Ingredients'));
+    if (details) details.open = true;
+    return !!details;
+  })()`);
+}
+
+async function toggleIngredient(app, groupLabel, name) {
+  const ok = await app.eval(`(() => {
+    const group = document.querySelector('[aria-label="${groupLabel} used for suggestions"]');
+    const chip = group && [...group.querySelectorAll('.chip')]
+      .find((node) => node.textContent.trim() === ${JSON.stringify(name)});
+    if (!chip) return false;
+    chip.click();
+    return true;
+  })()`);
+  assert.equal(ok, true, `no "${name}" chip in ${groupLabel}`);
+  await app.waitFor('true');
+}
+
+async function suggestionText(app) {
+  await app.click('Suggest something new');
+  await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'suggestion modal' });
+  const text = await app.text('#modal-host');
+  await app.click('Close', '#modal-host button');
+  await app.waitFor('document.getElementById("modal-host").hidden', { label: 'suggestion closed' });
+  return text;
+}
+
+test('ingredients switched off are skipped by suggestions and persist across reloads', async () => {
+  await withApp(async (app) => {
+    await app.goto('/combos');
+    const before = await app.text();
+    assert.match(before, /of 120 tried/, 'coverage starts from the full menu');
+
+    await openIngredients(app);
+    await toggleIngredient(app, 'Sauces', 'Creamy Mushroom');
+    await toggleIngredient(app, 'Toppings', 'Italian Sausage');
+
+    await app.waitFor(`(async () => {
+      const module = await import('${app.origin}/js/db.js');
+      const saved = (await module.getSettings()).comboExclusions;
+      return Array.isArray(saved) && saved.length === 2;
+    })()`, { label: 'exclusions saved' });
+
+    // 4 pastas x 5 remaining sauces x (3 remaining toppings + no topping).
+    assert.match(await app.text(), /Picks from the 80 of 120 combos you eat/);
+    // Coverage still measures the whole promotion, not one diner's preferences.
+    assert.match(await app.text(), /of 120 tried/);
+    assert.match(await app.text(), /SKIPPED/);
+
+    await app.reload();
+    await app.goto('/combos');
+    assert.match(await app.text(), /Picks from the 80 of 120 combos you eat/);
+
+    for (let i = 0; i < 6; i++) {
+      const suggestion = await suggestionText(app);
+      assert.ok(!suggestion.includes('Creamy Mushroom'), suggestion);
+      assert.ok(!suggestion.includes('Italian Sausage'), suggestion);
+    }
+    app.assertNoErrors();
+  }, { seed: COMBO_FIXTURE });
+});
+
+test('the only combination left after opting out is the one suggested', async () => {
+  await withApp(async (app) => {
+    // One pasta, one sauce, one topping leaves exactly two combos: with the
+    // topping and without it. Opting out of "No topping" leaves precisely one.
+    await trimMenuTo(app, {
+      pastaName: 'Fettuccine', sauceName: 'Alfredo', keepToppings: ['Meatballs'],
+    });
+    await app.reload();
+    await app.goto('/combos');
+    assert.match(await app.text(), /0 of 2 tried/);
+
+    await openIngredients(app);
+    await toggleIngredient(app, 'Toppings', 'No topping');
+    assert.match(await app.text(), /Picks from the 1 of 2 combos you eat/);
+
+    assert.match(await suggestionText(app), /Fettuccine with Alfredo and Meatballs/);
+    app.assertNoErrors();
+  }, { seed: { people: [{ name: 'Alice' }] } });
+});
+
+test('opting out of every pasta explains that nothing matches', async () => {
+  await withApp(async (app) => {
+    await app.goto('/combos');
+    await openIngredients(app);
+    for (const pasta of ['Fettuccine', 'Spaghetti', 'Angel Hair', 'Rigatoni']) {
+      await toggleIngredient(app, 'Pastas', pasta);
+    }
+
+    await app.click('Suggest something new');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'no-match modal' });
+    const text = await app.text('#modal-host');
+    assert.match(text, /No combos match/i);
+    assert.match(text, /Turn at least one of each back on/i);
+    app.assertNoErrors();
+  }, { seed: COMBO_FIXTURE });
+});
+
+test('use everything again clears every opt-out', async () => {
+  await withApp(async (app) => {
+    await app.goto('/combos');
+    await openIngredients(app);
+    await toggleIngredient(app, 'Sauces', 'Creamy Mushroom');
+    assert.match(await app.text(), /skipping 1 ingredient/);
+
+    await app.click('Use everything again');
+    await app.waitFor(`(async () => {
+      const module = await import('${app.origin}/js/db.js');
+      return (await module.getSettings()).comboExclusions.length === 0;
+    })()`, { label: 'exclusions cleared' });
+
+    const text = await app.text();
+    assert.match(text, /using everything/i);
+    assert.doesNotMatch(text, /SKIPPED/);
+    app.assertNoErrors();
+  }, { seed: COMBO_FIXTURE });
+});
+
 test('coverage summary counts distinct seeded combos against the live menu total', async () => {
   await withApp(async (app) => {
     const state = await comboState(app);

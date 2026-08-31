@@ -34,6 +34,8 @@ matters: *what is each bowl actually costing me?*
   frozen there. Correcting a location default later never rewrites your history.
 - **120-combo explorer.** A grid of every pasta × sauce × topping combination, tracking which
   you have tried, with a "suggest something new" button.
+- **Ingredients you actually eat.** Switch any pasta, sauce, or topping off and the suggester
+  skips it, without hiding it from logging or changing your combo coverage.
 - **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items. On a phone the
   photo button offers both the camera and your library. Settings can export every visit-gallery
   and bowl photo as one ZIP archive, named by photo timestamp.
@@ -184,6 +186,27 @@ setting in force at the time. **Changing the level never re-encodes photos you h
 saved** — older photos simply keep the quality they were stored at, which is covered by a
 regression test. Thumbnails stay 320px at every level so lists remain fast, and photos are
 always JPEG, so exports never carry EXIF location data.
+
+## Combo suggestions
+
+**Combos → Ingredients** switches individual pastas, sauces, and toppings off, so "Suggest
+something new" never proposes something you would not order. "No topping" is itself an
+ingredient here, so you can insist on always having one.
+
+<img src="docs/screenshots/combo-ingredients.png" alt="Ingredient chips with Creamy Mushroom and Italian Sausage switched off" width="240">
+
+This is deliberately *not* the same as retiring an item in Settings:
+
+| | Ingredients opt-out | Retire in Settings |
+|---|---|---|
+| Combo suggestions | skipped | skipped |
+| Still loggable on a bowl | ✅ yes | ❌ no |
+| Counts toward the 120 total and your coverage | ✅ yes | ❌ no |
+
+Coverage keeps measuring the whole promotion, because the 120 figure is what Olive Garden
+advertises rather than a per-diner preference. Opted-out ingredients are marked **SKIPPED** in
+the matrix, and "Use everything again" clears the lot. The choice is stored per device alongside
+your other settings, and an ingredient that is later removed from the menu is ignored.
 
 ## The 2026 menu
 

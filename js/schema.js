@@ -81,6 +81,7 @@ export const SETTING_KEYS = {
   seasonStart: 'seasonStart',
   seasonEnd: 'seasonEnd',
   photoQuality: 'photoQuality',
+  comboExclusions: 'comboExclusions',
   theme: 'theme',
   seeded: 'seeded',
 };
@@ -113,6 +114,11 @@ export const DEFAULT_SETTINGS = {
   [SETTING_KEYS.seasonEnd]: '2026-11-22',
   /** Applies to newly added photos only; existing photos are never re-encoded. */
   [SETTING_KEYS.photoQuality]: DEFAULT_PHOTO_QUALITY,
+  /**
+   * Ingredient keys the combo suggester skips. Frozen because getSettings()
+   * shallow-copies these defaults, so a caller must never mutate it in place.
+   */
+  [SETTING_KEYS.comboExclusions]: Object.freeze([]),
 };
 
 export const OWNER_TYPES = ['visit', 'bowl', 'person', 'menuItem'];

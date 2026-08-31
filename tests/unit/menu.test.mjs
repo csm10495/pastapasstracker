@@ -5,7 +5,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { comboKey, KINDS, KIND_LABEL } from '../../js/menu.js';
+import {
+  NO_TOPPING_KEY, allowedComboCount, allowedItems, comboKey, exclusionKey, untriedSuggestions,
+  KINDS, KIND_LABEL,
+} from '../../js/menu.js';
 import { DEFAULT_SETTINGS, SEED_MENU, SETTING_KEYS } from '../../js/schema.js';
 
 test('comboKey is stable for the same pasta, sauce, and topping', () => {
@@ -70,6 +73,7 @@ test('the seeded menu has no duplicate names within a kind', () => {
 
 test('DEFAULT_SETTINGS exposes the expected persisted defaults', () => {
   assert.deepEqual(Object.keys(DEFAULT_SETTINGS).sort(), [
+    SETTING_KEYS.comboExclusions,
     SETTING_KEYS.mealPrice,
     SETTING_KEYS.passCost,
     SETTING_KEYS.photoQuality,
@@ -91,4 +95,93 @@ test('DEFAULT_SETTINGS season dates are valid YYYY-MM-DD values in order', () =>
   assert.match(DEFAULT_SETTINGS.seasonStart, /^\d{4}-\d{2}-\d{2}$/);
   assert.match(DEFAULT_SETTINGS.seasonEnd, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(DEFAULT_SETTINGS.seasonStart < DEFAULT_SETTINGS.seasonEnd, true);
+});
+
+/* --------------------------------------------- suggestion exclusions ---- */
+
+const PASTAS = [{ id: 'p1', name: 'Fettuccine' }, { id: 'p2', name: 'Rigatoni' }];
+const SAUCES = [{ id: 's1', name: 'Alfredo' }, { id: 's2', name: 'Creamy Mushroom' }];
+const TOPPINGS = [
+  { id: null, name: 'No topping' },
+  { id: 't1', name: 'Meatballs' },
+  { id: 't2', name: 'Italian Sausage' },
+];
+
+const suggest = (exclusions, tried = new Set()) => untriedSuggestions({
+  pastas: PASTAS, sauces: SAUCES, toppingOptions: TOPPINGS, tried, exclusions,
+});
+
+test('exclusionKey uses the menu item id and a sentinel for "no topping"', () => {
+  assert.equal(exclusionKey({ id: 't1', name: 'Meatballs' }), 't1');
+  assert.equal(exclusionKey({ id: null, name: 'No topping' }), NO_TOPPING_KEY);
+  assert.equal(exclusionKey(undefined), NO_TOPPING_KEY);
+});
+
+test('an unfiltered suggestion pool covers every combination', () => {
+  assert.equal(suggest([]).length, 2 * 2 * 3);
+  assert.equal(allowedComboCount({
+    pastas: PASTAS, sauces: SAUCES, toppingOptions: TOPPINGS, exclusions: [],
+  }), 12);
+});
+
+test('excluding a sauce and a topping removes only their combinations', () => {
+  const picks = suggest(['s2', 't2']);
+
+  assert.equal(picks.length, 2 * 1 * 2);
+  assert.ok(!picks.some((pick) => pick.sauce.id === 's2'), 'no excluded sauce');
+  assert.ok(!picks.some((pick) => pick.topping.id === 't2'), 'no excluded topping');
+  assert.ok(picks.some((pick) => pick.topping.id === null), '"no topping" is still offered');
+});
+
+test('"no topping" can itself be excluded', () => {
+  const picks = suggest([NO_TOPPING_KEY]);
+
+  assert.equal(picks.length, 2 * 2 * 2);
+  assert.ok(picks.every((pick) => pick.topping.id !== null));
+});
+
+// The view holds live state in a Set while the persisted setting is an array.
+// Array.isArray is false for a Set, so a naive guard would drop every exclusion.
+test('exclusions are honoured whether passed as a Set or an array', () => {
+  assert.equal(suggest(new Set(['s2'])).length, suggest(['s2']).length);
+  assert.equal(allowedComboCount({
+    pastas: PASTAS, sauces: SAUCES, toppingOptions: TOPPINGS, exclusions: new Set(['s2']),
+  }), 6);
+  assert.deepEqual(allowedItems(SAUCES, new Set(['s2'])).map((item) => item.name), ['Alfredo']);
+});
+
+test('tried combinations are never suggested again', () => {
+  const tried = new Set([comboKey('p1', 's1', null)]);
+  const picks = suggest([], tried);
+
+  assert.equal(picks.length, 11);
+  assert.ok(!picks.some((pick) => comboKey(pick.pasta.id, pick.sauce.id, pick.topping.id) === comboKey('p1', 's1', null)));
+});
+
+test('excluding every item of one kind leaves nothing to suggest', () => {
+  assert.equal(suggest(['p1', 'p2']).length, 0);
+  assert.equal(allowedComboCount({
+    pastas: PASTAS, sauces: SAUCES, toppingOptions: TOPPINGS, exclusions: ['p1', 'p2'],
+  }), 0);
+});
+
+test('a stale exclusion for a removed menu item is simply ignored', () => {
+  assert.equal(suggest(['deleted-item-id']).length, 12);
+});
+
+test('missing or malformed exclusions fall back to no filtering', () => {
+  for (const value of [undefined, null, 'nope', 42]) {
+    assert.equal(suggest(value).length, 12, `exclusions: ${String(value)}`);
+  }
+  assert.equal(untriedSuggestions().length, 0, 'no menu means nothing to suggest');
+});
+
+test('the default combo exclusions are empty and immutable', () => {
+  assert.deepEqual([...DEFAULT_SETTINGS[SETTING_KEYS.comboExclusions]], []);
+  // getSettings() shallow-copies the defaults, so a shared mutable array would
+  // leak one screen's edit into every later read.
+  assert.throws(() => {
+    'use strict';
+    DEFAULT_SETTINGS[SETTING_KEYS.comboExclusions].push('oops');
+  }, TypeError);
 });
