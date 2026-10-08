@@ -3,13 +3,18 @@
  *
  * The common case at the table is another bowl just like the last one, so the
  * sheet opens pre-filled with the previous bowl's choices — tapping Save is a
- * one-tap refill. Shared by the dashboard, the visit list, and visit detail.
+ * one-tap refill. Shared by the dashboard, the visit list, visit detail, and
+ * the combo explorer, which pre-fills a picked combo instead.
  */
 
-import { getAll, getByIndex, save, getById, deleteBowlDeep } from './db.js';
+import {
+  getAll, getByIndex, save, getById, deleteBowlDeep, getOpenVisit, startVisit,
+} from './db.js';
 import { listMenu } from './menu.js';
-import { el, modal, toast, field } from './ui.js';
+import { el, modal, toast, field, todayISO } from './ui.js';
 import { photoPicker } from './photos.js';
+
+const isActiveDiner = (person) => person.active !== false;
 
 /**
  * Opens the quick-add sheet for a visit.
@@ -17,9 +22,12 @@ import { photoPicker } from './photos.js';
  * @param {string} visitId
  * @param {object} [opts]
  * @param {() => void} [opts.onAdded] called after each bowl is saved
+ * @param {{pastaId: string, sauceId: string, toppingId: string|null}} [opts.combo]
+ *   pre-selects this combo instead of repeating the previous bowl
+ * @param {string|null} [opts.personId] pre-selects this diner
  * @returns {Promise<number>} how many bowls were added
  */
-export async function quickAddBowl(visitId, { onAdded } = {}) {
+export async function quickAddBowl(visitId, { onAdded, combo = null, personId = null } = {}) {
   const [visit, people, pastas, sauces, toppings, existing] = await Promise.all([
     getById('visits', visitId),
     getAll('people'),
@@ -35,27 +43,16 @@ export async function quickAddBowl(visitId, { onAdded } = {}) {
   }
 
   const activePeople = people
-    .filter((p) => p.active !== false)
+    .filter(isActiveDiner)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
   if (!activePeople.length) {
-    await modal((close) => el('div', {},
-      el('h2', {}, 'Add a diner first'),
-      el('p', { class: 'muted' }, 'A bowl has to belong to someone. Add a diner, then come back.'),
-      el('div', { class: 'btn-row btn-row--end', style: { marginTop: '1rem' } },
-        el('button', { class: 'btn', onClick: () => close() }, 'Close'),
-        el('a', {
-          class: 'btn btn--primary',
-          href: '#/people',
-          onClick: () => close(),
-        }, 'Add a diner'),
-      ),
-    ));
+    await askForDiner();
     return 0;
   }
 
   if (!pastas.length || !sauces.length) {
-    toast('Add pastas and sauces in Settings first.', 'bad');
+    warnNoMenu();
     return 0;
   }
 
@@ -63,10 +60,12 @@ export async function quickAddBowl(visitId, { onAdded } = {}) {
 
   // Carried across sheets so "Save & add another" keeps the last choices.
   let draft = {
-    personId: previous?.personId || activePeople[0].id,
-    pastaId: previous?.pastaId || pastas[0].id,
-    sauceId: previous?.sauceId || sauces[0].id,
-    toppingId: previous?.toppingId ?? null,
+    personId: personId || previous?.personId || activePeople[0].id,
+    pastaId: combo?.pastaId || previous?.pastaId || pastas[0].id,
+    sauceId: combo?.sauceId || previous?.sauceId || sauces[0].id,
+    // A picked combo's null topping is "No topping", a real choice, so it must
+    // not fall back to the previous bowl's topping.
+    toppingId: combo ? (combo.toppingId ?? null) : (previous?.toppingId ?? null),
     rating: null,
   };
 
@@ -86,6 +85,12 @@ export async function quickAddBowl(visitId, { onAdded } = {}) {
     // half-finished bowl would be left behind.
     let reservedId = null;
     let committed = false;
+
+    // "Save & add another" carries the bowl just saved, so only the first sheet
+    // is still showing the picked combo.
+    const note = combo && !added
+      ? 'Pre-filled with the combo you picked.'
+      : previous ? 'Pre-filled with the last bowl — just save for a repeat.' : null;
 
     const outcome = await modal((close) => {
       const personSelect = selectOf(
@@ -144,10 +149,7 @@ export async function quickAddBowl(visitId, { onAdded } = {}) {
         onSubmit: (event) => { event.preventDefault(); commit('done'); },
       },
       el('h2', {}, 'Add a bowl'),
-      previous
-        ? el('p', { class: 'muted small' },
-          'Pre-filled with the last bowl — just save for a repeat.')
-        : null,
+      note ? el('p', { class: 'muted small' }, note) : null,
       field('Who', personSelect),
       el('div', { class: 'grid grid--2' },
         field('Pasta', pastaSelect),
@@ -170,6 +172,54 @@ export async function quickAddBowl(visitId, { onAdded } = {}) {
     if (!committed && reservedId) await deleteBowlDeep(reservedId);
     return outcome;
   }
+}
+
+/**
+ * Logs a bowl right now: onto the visit in progress, or onto a new one for
+ * today when nothing is open — the same rule as the tab bar's Log button.
+ *
+ * @param {object} [opts] passed through to quickAddBowl
+ * @returns {Promise<number>} how many bowls were added
+ */
+export async function logBowl(opts = {}) {
+  let visit = await getOpenVisit();
+  if (!visit) {
+    // Check before starting a visit, or a dead end would leave an empty one
+    // open behind it.
+    const [people, pastas, sauces] = await Promise.all([
+      getAll('people'), listMenu('pasta'), listMenu('sauce'),
+    ]);
+    if (!people.some(isActiveDiner)) {
+      await askForDiner();
+      return 0;
+    }
+    if (!pastas.length || !sauces.length) {
+      warnNoMenu();
+      return 0;
+    }
+    visit = await startVisit({ date: todayISO() });
+    toast('Visit started');
+  }
+  return quickAddBowl(visit.id, opts);
+}
+
+function askForDiner() {
+  return modal((close) => el('div', {},
+    el('h2', {}, 'Add a diner first'),
+    el('p', { class: 'muted' }, 'A bowl has to belong to someone. Add a diner, then come back.'),
+    el('div', { class: 'btn-row btn-row--end', style: { marginTop: '1rem' } },
+      el('button', { class: 'btn', onClick: () => close() }, 'Close'),
+      el('a', {
+        class: 'btn btn--primary',
+        href: '#/people',
+        onClick: () => close(),
+      }, 'Add a diner'),
+    ),
+  ));
+}
+
+function warnNoMenu() {
+  toast('Add pastas and sauces in Settings first.', 'bad');
 }
 
 function menuOptions(items) {

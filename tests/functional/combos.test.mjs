@@ -99,6 +99,79 @@ async function suggestionText(app) {
   return text;
 }
 
+const DINERS = { people: [{ name: 'Alice', hasPass: true }, { name: 'Bob', hasPass: false }] };
+
+/** Opens a visit for today whose last bowl is `bowl`, as if already at the table. */
+async function sitDown(app, bowl = {
+  person: 'Alice', pasta: 'Spaghetti', sauce: 'Meat Sauce', topping: 'Meatballs',
+}) {
+  return app.run(`
+    const want = ${JSON.stringify(bowl)};
+    const ui = await import('${app.origin}/js/ui.js');
+    const ids = Object.fromEntries((await db.getAll('menuItems')).map((i) => [i.name, i.id]));
+    const people = Object.fromEntries((await db.getAll('people')).map((p) => [p.name, p.id]));
+    const visit = await db.startVisit({ date: ui.todayISO() });
+    await db.save('bowls', {
+      visitId: visit.id,
+      personId: people[want.person],
+      pastaId: ids[want.pasta],
+      sauceId: ids[want.sauce],
+      toppingId: want.topping ? ids[want.topping] : null,
+      rating: null,
+      notes: '',
+      seq: 0,
+    });
+    return visit;
+  `);
+}
+
+async function clickModalButton(app, text) {
+  const ok = await app.eval(`(() => {
+    const target = [...document.querySelectorAll('#modal-host button, #modal-host a')]
+      .find((n) => n.textContent.replace(/\\s+/g, ' ').trim() === ${JSON.stringify(text)});
+    if (!target) return false;
+    target.click();
+    return true;
+  })()`);
+  assert.equal(ok, true, `no "${text}" button in the open modal`);
+}
+
+async function waitForBowlSheet(app) {
+  await app.waitFor(
+    `!document.getElementById('modal-host').hidden
+      && document.querySelector('#modal-host h2')?.textContent === 'Add a bowl'`,
+    { label: 'add-bowl sheet' },
+  );
+}
+
+/** What the add-bowl sheet is set to, by visible label. */
+function sheetChoices(app) {
+  return app.eval(`(() => {
+    const [who, pasta, sauce, topping] = [...document.querySelectorAll('#modal-host select')]
+      .map((select) => (select.selectedOptions[0]?.text || '').replace(/ \\(NEW\\)$/, ''));
+    return { who, pasta, sauce, topping };
+  })()`);
+}
+
+async function saveBowlSheet(app) {
+  await clickModalButton(app, 'Save');
+  await app.waitFor(`document.getElementById('modal-host').hidden`, { label: 'bowl sheet saved' });
+}
+
+async function triedCount(app) {
+  const match = (await app.text()).match(/(\d+) of \d+ tried/);
+  assert.ok(match, 'coverage summary is on screen');
+  return Number(match[1]);
+}
+
+function idsByName(app, store) {
+  return app.run(`return Object.fromEntries((await db.getAll(${JSON.stringify(store)})).map((r) => [r.name, r.id]));`);
+}
+
+async function today(app) {
+  return app.eval(`(async () => (await import('${app.origin}/js/ui.js')).todayISO())()`);
+}
+
 test('ingredients switched off are skipped by suggestions and persist across reloads', async () => {
   await withApp(async (app) => {
     await app.goto('/combos');
@@ -345,6 +418,181 @@ test('empty combo explorer state appears when there are no active menu items', a
     await app.reload();
     await app.goto('/combos');
     assert.match(await app.text(), /No menu items/i);
+    app.assertNoErrors();
+  });
+});
+
+test('Log it on a suggestion opens the add-bowl sheet set to that combo for the open visit, not the visit form', async () => {
+  await withApp(async (app) => {
+    const visit = await sitDown(app);
+    await app.goto('/combos');
+    const before = await triedCount(app);
+
+    await app.click('Suggest something new');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'suggestion modal' });
+    const suggestion = await app.text('#modal-host');
+    await clickModalButton(app, 'Log it');
+    await waitForBowlSheet(app);
+
+    assert.equal(await app.eval('location.hash'), '#/combos', 'stays on the explorer');
+    const choices = await sheetChoices(app);
+    const named = `Try ${choices.pasta} with ${choices.sauce}`
+      + `${choices.topping === 'No topping' ? '' : ` and ${choices.topping}`}.`;
+    assert.ok(suggestion.includes(named), `sheet is set to "${named}" but suggested: ${suggestion}`);
+    assert.equal(choices.who, 'Alice', 'with no filter the last diner is kept');
+    assert.match(await app.text('#modal-host'), /Pre-filled with the combo you picked/);
+
+    await saveBowlSheet(app);
+
+    const menu = await idsByName(app, 'menuItems');
+    const bowls = (await app.store('bowls')).sort((a, b) => a.seq - b.seq);
+    assert.equal(bowls.length, 2);
+    assert.equal(bowls[1].visitId, visit.id);
+    assert.equal(bowls[1].seq, 1);
+    assert.deepEqual(
+      [bowls[1].pastaId, bowls[1].sauceId, bowls[1].toppingId],
+      [menu[choices.pasta], menu[choices.sauce], menu[choices.topping] ?? null],
+    );
+    const visits = await app.store('visits');
+    assert.equal(visits.length, 1, 'no second visit is started');
+    assert.equal(visits[0].endedAt, null);
+
+    // The explorer redraws in place, so the combo just logged is now tried.
+    await app.waitFor(`document.querySelector(${JSON.stringify(
+      cellSelector(choices.pasta, choices.sauce, choices.topping),
+    )})?.textContent === '✓'`, { label: 'logged square marked tried' });
+    assert.equal(await triedCount(app), before + 1);
+    assert.equal(await app.eval('location.hash'), '#/combos');
+    app.assertNoErrors();
+  }, { seed: DINERS });
+});
+
+test('Log it keeps a suggested No topping instead of the last bowl\'s topping', async () => {
+  await withApp(async (app) => {
+    // With one pasta, one sauce and one topping, trying the topped combo leaves
+    // only the plain one to suggest — while the last bowl still has a topping.
+    await trimMenuTo(app, {
+      pastaName: 'Fettuccine', sauceName: 'Alfredo', keepToppings: ['Meatballs'],
+    });
+    await sitDown(app, {
+      person: 'Alice', pasta: 'Fettuccine', sauce: 'Alfredo', topping: 'Meatballs',
+    });
+    await app.reload();
+    await app.goto('/combos');
+    assert.match(await app.text(), /1 of 2 tried/);
+
+    await app.click('Suggest something new');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'suggestion modal' });
+    assert.match(await app.text('#modal-host'), /Try Fettuccine with Alfredo\./);
+    await clickModalButton(app, 'Log it');
+    await waitForBowlSheet(app);
+
+    assert.deepEqual(await sheetChoices(app), {
+      who: 'Alice', pasta: 'Fettuccine', sauce: 'Alfredo', topping: 'No topping',
+    });
+    await saveBowlSheet(app);
+
+    const bowls = (await app.store('bowls')).sort((a, b) => a.seq - b.seq);
+    assert.equal(bowls.length, 2);
+    assert.equal(bowls[1].toppingId, null);
+    await app.waitFor(`document.getElementById('view').innerText.includes('2 of 2 tried')`,
+      { label: 'coverage complete' });
+    app.assertNoErrors();
+  }, { seed: { people: [{ name: 'Alice' }] } });
+});
+
+test('Log it starts a visit for today when none is open', async () => {
+  await withApp(async (app) => {
+    await app.goto('/combos');
+    await app.click('Suggest something new');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'suggestion modal' });
+    await clickModalButton(app, 'Log it');
+    await waitForBowlSheet(app);
+
+    const [visit, ...others] = await app.store('visits');
+    assert.equal(others.length, 0);
+    assert.equal(visit.date, await today(app));
+    assert.equal(visit.endedAt, null);
+
+    const choices = await sheetChoices(app);
+    await saveBowlSheet(app);
+    const menu = await idsByName(app, 'menuItems');
+    const [bowl] = await app.store('bowls');
+    assert.equal(bowl.visitId, visit.id);
+    assert.equal(bowl.pastaId, menu[choices.pasta]);
+    assert.equal(bowl.sauceId, menu[choices.sauce]);
+    assert.equal(bowl.toppingId, menu[choices.topping] ?? null);
+    assert.equal(await app.eval('location.hash'), '#/combos');
+    app.assertNoErrors();
+  }, { seed: { people: [{ name: 'Alice' }] } });
+});
+
+test('Log this combo on a square pre-fills that combo for the filtered diner', async () => {
+  await withApp(async (app) => {
+    const visit = await sitDown(app);
+    await app.goto('/combos');
+    await app.click('Bob', '.chip');
+    const square = cellSelector('Angel Hair', 'Five Cheese Marinara', 'Italian Sausage');
+    assert.equal(await app.eval(`document.querySelector(${JSON.stringify(square)}).textContent`), '·');
+
+    await app.clickSelector(square);
+    await clickModalButton(app, 'Log this combo');
+    await waitForBowlSheet(app);
+    assert.deepEqual(await sheetChoices(app), {
+      who: 'Bob', pasta: 'Angel Hair', sauce: 'Five Cheese Marinara', topping: 'Italian Sausage',
+    });
+    await saveBowlSheet(app);
+
+    const people = await idsByName(app, 'people');
+    const bowls = (await app.store('bowls')).sort((a, b) => a.seq - b.seq);
+    assert.equal(bowls.length, 2);
+    assert.equal(bowls[1].personId, people.Bob);
+    assert.equal(bowls[1].visitId, visit.id);
+
+    // Bob's filter survives the redraw and now shows the square as tried.
+    await app.waitFor(`document.querySelector(${JSON.stringify(square)})?.textContent === '✓'`,
+      { label: 'square marked tried for Bob' });
+    const pressed = await app.eval(`[...document.querySelectorAll(
+      '[aria-label="Combo person filter"] .chip[aria-pressed="true"]',
+    )].map((n) => n.textContent.trim())`);
+    assert.deepEqual(pressed, ['Bob']);
+    app.assertNoErrors();
+  }, { seed: DINERS });
+});
+
+test('the explorer\'s Log a bowl button opens the add-bowl sheet, not the visit form', async () => {
+  await withApp(async (app) => {
+    await sitDown(app);
+    await app.goto('/combos');
+    await app.click('Log a bowl', '#view header .btn');
+    await waitForBowlSheet(app);
+
+    assert.equal(await app.eval('location.hash'), '#/combos');
+    assert.match(await app.text('#modal-host'), /Pre-filled with the last bowl/);
+    assert.deepEqual(await sheetChoices(app), {
+      who: 'Alice', pasta: 'Spaghetti', sauce: 'Meat Sauce', topping: 'Meatballs',
+    });
+
+    await clickModalButton(app, 'Cancel');
+    await app.waitFor(`document.getElementById('modal-host').hidden`, { label: 'sheet cancelled' });
+    assert.equal((await app.store('bowls')).length, 1);
+    assert.equal((await app.store('visits')).length, 1);
+    app.assertNoErrors();
+  }, { seed: DINERS });
+});
+
+test('Log it with no diners asks for one instead of leaving an empty visit open', async () => {
+  await withApp(async (app) => {
+    await app.goto('/combos');
+    await app.click('Suggest something new');
+    await app.waitFor('!document.getElementById("modal-host").hidden', { label: 'suggestion modal' });
+    await clickModalButton(app, 'Log it');
+    await app.waitFor(`document.getElementById('modal-host').innerText.includes('Add a diner first')`,
+      { label: 'add a diner prompt' });
+
+    assert.equal((await app.store('visits')).length, 0);
+    await clickModalButton(app, 'Close');
+    await app.waitFor(`document.getElementById('modal-host').hidden`, { label: 'prompt closed' });
     app.assertNoErrors();
   });
 });
