@@ -33,7 +33,8 @@ matters: *what is each bowl actually costing me?*
 - **Per-visit pricing.** Prices vary by location, so the price is captured on each visit and
   frozen there. Correcting a location default later never rewrites your history.
 - **120-combo explorer.** A grid of every pasta × sauce × topping combination, tracking which
-  you have tried, with a "suggest something new" button.
+  you have tried, with a "suggest something new" button. **Log it** opens the add-bowl sheet
+  already set to that combo, ready for the visit you are at.
 - **Ingredients you actually eat.** Switch any pasta, sauce, or topping off and the suggester
   skips it, without hiding it from logging or changing your combo coverage.
 - **Photos everywhere.** Optional photos on visits, bowls, diners, and menu items. On a phone the
@@ -207,6 +208,16 @@ Coverage keeps measuring the whole promotion, because the 120 figure is what Oli
 advertises rather than a per-diner preference. Opted-out ingredients are marked **SKIPPED** in
 the matrix, and "Use everything again" clears the lot. The choice is stored per device alongside
 your other settings, and an ingredient that is later removed from the menu is ignored.
+
+### Logging a combo
+
+**Log it** on a suggestion, or **Log this combo** on any square of the matrix, opens the
+add-bowl sheet with that pasta, sauce, and topping already chosen — *No topping* included — and
+adds the bowl to the visit you have open. With nothing open it starts one for today, exactly like
+the tab bar's **＋ Bowl**. When the filter is set to one diner the bowl is pre-assigned to them,
+since those were their untried combos. You stay on the explorer, and the square flips to ✓ as
+soon as the bowl is saved. The **＋ Log a bowl** button at the top opens the same sheet,
+pre-filled with your last bowl as usual.
 
 ## The 2026 menu
 

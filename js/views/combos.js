@@ -3,13 +3,14 @@ import {
   allowedComboCount, allowedItems, comboKey, exclusionKey, listMenu, untriedSuggestions,
 } from '../menu.js';
 import { barChart, donut } from '../charts.js';
+import { logBowl } from '../quick-bowl.js';
 import { clear, el, empty, modal, plural } from '../ui.js';
 import { SETTING_KEYS } from '../schema.js';
 
 export async function render(container, params) {
   void params;
 
-  const [pastas, sauces, toppings, bowls, people, savedExclusions] = await Promise.all([
+  const [pastas, sauces, toppings, savedBowls, people, savedExclusions] = await Promise.all([
     listMenu('pasta'),
     listMenu('sauce'),
     listMenu('topping'),
@@ -18,6 +19,7 @@ export async function render(container, params) {
     getSetting(SETTING_KEYS.comboExclusions),
   ]);
 
+  let bowls = savedBowls;
   const activePeople = people
     .filter((person) => person.active !== false)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
@@ -31,16 +33,29 @@ export async function render(container, params) {
   // A menu item retired since the preference was saved simply stops matching,
   // so a stale key is harmless and is dropped the next time this is written.
   let exclusions = new Set(Array.isArray(savedExclusions) ? savedExclusions : []);
+  let redraw = null;
+
+  // Logging opens the bowl sheet over this screen and redraws in place, so the
+  // diner filter and scroll position survive and the new square shows ✓.
+  const logHere = async (opts) => {
+    const added = await logBowl(opts);
+    if (!added) return;
+    bowls = await getAll('bowls');
+    redraw?.();
+  };
+  // Suggestions and squares follow the diner filter, so log them for that diner.
+  const logCombo = (combo) => logHere({ combo, personId: selectedPersonId });
 
   container.append(el('header', { class: 'spread' },
     el('div', {},
       el('h1', {}, 'Combo Explorer'),
       el('p', { class: 'muted small' }, 'Track every pasta, sauce, and topping combination.'),
     ),
-    el('a', {
+    el('button', {
+      type: 'button',
       class: 'btn btn--primary nowrap',
-      href: '#/visits/new',
       style: { flex: 'none' },
+      onClick: () => logHere(),
     }, '＋ Log a bowl'),
   ));
 
@@ -63,7 +78,7 @@ export async function render(container, params) {
     redraw();
   };
 
-  const redraw = () => {
+  redraw = () => {
     clear(host);
     const scopedBowls = selectedPersonId
       ? bowls.filter((bowl) => bowl.personId === selectedPersonId)
@@ -79,7 +94,7 @@ export async function render(container, params) {
         redraw();
       }),
       suggestCard({
-        pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions,
+        pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions, onLog: logCombo,
       }),
       preferencesCard({ pastas, sauces, toppingOptions, exclusions, setExclusions }),
     );
@@ -99,6 +114,7 @@ export async function render(container, params) {
       bowls: scopedBowls,
       peopleById,
       exclusions,
+      onLog: logCombo,
     }));
 
     host.append(exploredCard({ pastas, sauces, bowls: scopedBowls }));
@@ -158,7 +174,9 @@ function chip(label, pressed, onClick) {
   }, label);
 }
 
-function suggestCard({ pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions }) {
+function suggestCard({
+  pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions, onLog,
+}) {
   const allowed = allowedComboCount({ pastas, sauces, toppingOptions, exclusions });
   const filtered = exclusions.size > 0;
   return el('div', { class: 'card' },
@@ -174,7 +192,7 @@ function suggestCard({ pastas, sauces, toppingOptions, triedCombos, totalCombos,
         type: 'button',
         class: 'btn btn--primary',
         onClick: () => suggestCombo({
-          pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions,
+          pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions, onLog,
         }),
       }, 'Suggest something new'),
     ),
@@ -245,7 +263,9 @@ function preferencesCard({ pastas, sauces, toppingOptions, exclusions, setExclus
   return details;
 }
 
-function suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions }) {
+function suggestCombo({
+  pastas, sauces, toppingOptions, triedCombos, totalCombos, exclusions, onLog,
+}) {
   const allowed = allowedComboCount({ pastas, sauces, toppingOptions, exclusions });
 
   if (!allowed) {
@@ -274,7 +294,11 @@ function suggestCombo({ pastas, sauces, toppingOptions, triedCombos, totalCombos
     el('p', {}, suggestionText(pick)),
     el('div', { class: 'btn-row btn-row--end' },
       el('button', { type: 'button', class: 'btn', onClick: () => close() }, 'Close'),
-      el('a', { class: 'btn btn--primary', href: '#/visits/new', onClick: () => close() }, 'Log it'),
+      el('button', {
+        type: 'button',
+        class: 'btn btn--primary',
+        onClick: () => { close(); onLog(comboIds(pick)); },
+      }, 'Log it'),
     ),
   ));
 }
@@ -289,7 +313,9 @@ function notice(title, message, confirmLabel = 'Close') {
   ));
 }
 
-function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }) {
+function matrix({
+  pastas, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions, onLog,
+}) {
   const wrapper = el('div', { class: 'stack' });
   for (const pasta of pastas) {
     wrapper.append(el('section', { class: 'card' },
@@ -299,7 +325,9 @@ function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById
         skipBadge(pasta, exclusions),
       ),
       el('div', { style: { overflowX: 'auto', paddingBottom: '.2rem' } },
-        matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }),
+        matrixGrid({
+          pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions, onLog,
+        }),
       ),
     ));
   }
@@ -312,7 +340,9 @@ function matrix({ pastas, sauces, toppingOptions, triedCombos, bowls, peopleById
   return wrapper;
 }
 
-function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions }) {
+function matrixGrid({
+  pasta, sauces, toppingOptions, triedCombos, bowls, peopleById, exclusions, onLog,
+}) {
   const grid = el('div', {
     role: 'grid',
     style: {
@@ -354,7 +384,7 @@ function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleB
         role: 'gridcell',
         title: label,
         'aria-label': label,
-        onClick: () => openComboModal({ pasta, sauce, topping, bowls, peopleById }),
+        onClick: () => openComboModal({ pasta, sauce, topping, bowls, peopleById, onLog }),
         style: {
           minHeight: '44px',
           borderRadius: 'var(--radius-sm)',
@@ -372,7 +402,7 @@ function matrixGrid({ pasta, sauces, toppingOptions, triedCombos, bowls, peopleB
   return grid;
 }
 
-function openComboModal({ pasta, sauce, topping, bowls, peopleById }) {
+function openComboModal({ pasta, sauce, topping, bowls, peopleById, onLog }) {
   const key = comboKey(pasta.id, sauce.id, topping.id);
   const matches = bowls.filter((bowl) => comboKey(bowl.pastaId, bowl.sauceId, bowl.toppingId) === key);
   const tried = matches.length > 0;
@@ -397,7 +427,11 @@ function openComboModal({ pasta, sauce, topping, bowls, peopleById }) {
     el('p', { class: 'small muted' }, comboParts({ pasta, sauce, topping })),
     el('div', { class: 'btn-row btn-row--end', style: { marginTop: '1rem' } },
       el('button', { type: 'button', class: 'btn', onClick: () => close() }, 'Close'),
-      el('a', { class: 'btn btn--primary', href: '#/visits/new', onClick: () => close() }, 'Log this combo'),
+      el('button', {
+        type: 'button',
+        class: 'btn btn--primary',
+        onClick: () => { close(); onLog(comboIds({ pasta, sauce, topping })); },
+      }, 'Log this combo'),
     ),
   ));
 }
@@ -478,6 +512,11 @@ function skipBadge(item, exclusions) {
 
 function comboName({ pasta, sauce, topping }) {
   return `${pasta.name} with ${sauce.name}${topping.id ? ` and ${topping.name}` : ''}`;
+}
+
+/** The ids a bowl stores; "No topping" carries a null topping id. */
+function comboIds({ pasta, sauce, topping }) {
+  return { pastaId: pasta.id, sauceId: sauce.id, toppingId: topping.id ?? null };
 }
 
 function suggestionText(pick) {
